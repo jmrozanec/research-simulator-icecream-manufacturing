@@ -6,13 +6,27 @@ Uses Pydantic for type safety, validation, and JSON serialization.
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
-# Input Stage: Raw Materials
+# Production State Machine
+# ---------------------------------------------------------------------------
+
+
+class State(str, Enum):
+    """Production line state. Wastewater is generated during CLEANING or IDLE→RUNNING."""
+
+    IDLE = "idle"
+    RUNNING = "running"
+    CLEANING = "cleaning"
+
+
+# ---------------------------------------------------------------------------
+# Input Stage: Raw Materials (defined early for IceCreamRecipe)
 # ---------------------------------------------------------------------------
 
 
@@ -29,6 +43,65 @@ class RawMaterials(BaseModel):
     def total_mass(self) -> float:
         """Total mass of raw materials (kg)."""
         return self.milk + self.cream + self.sugar + self.stabilizers + self.water
+
+
+# ---------------------------------------------------------------------------
+# Ice Cream Recipe (for BOD/FOG calculations)
+# ---------------------------------------------------------------------------
+
+
+class IceCreamRecipe(BaseModel):
+    """Recipe composition for BOD/FOG calculations in wastewater."""
+
+    fat_content: float = Field(ge=0, le=1, description="Mass fraction of fat (0-1)")
+    sugar_content: float = Field(ge=0, le=1, description="Mass fraction of sugar (0-1)")
+
+    @classmethod
+    def from_raw_materials(cls, raw_materials: RawMaterials) -> IceCreamRecipe:
+        """Derive recipe composition from raw materials."""
+        total = raw_materials.total_mass
+        if total <= 0:
+            return cls(fat_content=0.0, sugar_content=0.0)
+        # Approximate: milk ~4% fat, cream ~36% fat
+        fat_mass = raw_materials.milk * 0.04 + raw_materials.cream * 0.36
+        return cls(
+            fat_content=fat_mass / total,
+            sugar_content=raw_materials.sugar / total,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Shrinkage (Operational Loss)
+# ---------------------------------------------------------------------------
+
+
+class ShrinkageResult(BaseModel):
+    """Result of CalculateShrinkage: adhesion loss + interface flush."""
+
+    adhesion_loss_kg: float = Field(ge=0, description="Product lost to tank/pipe adhesion (kg)")
+    interface_flush_kg: float = Field(ge=0, description="Product discarded at start-of-run (kg)")
+    adhesion_loss_L: float = Field(ge=0, description="Adhesion loss volume (L)")
+    interface_flush_L: float = Field(ge=0, description="Interface flush volume (L)")
+    total_system_shrinkage_kg: float = Field(ge=0, description="Total product loss (kg)")
+    total_system_shrinkage_L: float = Field(ge=0, description="Total shrinkage volume (L)")
+
+
+# ---------------------------------------------------------------------------
+# Wastewater (from cleaning + operational loss)
+# ---------------------------------------------------------------------------
+
+
+class Wastewater(BaseModel):
+    """Wastewater from cleaning/flushing. BOD and FOG scale with product loss."""
+
+    volume_L: float = Field(ge=0, description="Total wastewater volume (L)")
+    product_loss_kg: float = Field(ge=0, description="Product (mix) lost into wastewater (kg)")
+    organic_content_kg: float = Field(ge=0, description="Organic load for BOD/bioplastic (kg)")
+    bod_mg_L: float = Field(ge=0, description="Biological Oxygen Demand concentration (mg/L)")
+    fog_mg_L: float = Field(ge=0, description="Fats, Oils, Grease concentration (mg/L)")
+    bod_load_kg: float = Field(ge=0, description="Total BOD load (kg O2 equivalent)")
+    cleaning_water_L: float = Field(ge=0, description="Cleaning water inflow (L)")
+
 
 # ---------------------------------------------------------------------------
 # Mixing Process (PIML) - Input/Output

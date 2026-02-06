@@ -14,7 +14,6 @@ from icecream_simulator import (
     RawMaterials,
     SimulationRunner,
     PlaceholderMixingModel,
-    PlaceholderFiltrationModel,
     PlaceholderBioplasticModel,
 )
 
@@ -22,7 +21,6 @@ from icecream_simulator import (
 def main() -> None:
     runner = SimulationRunner(
         mixing_model=PlaceholderMixingModel(),
-        filtration_model=PlaceholderFiltrationModel(product_recovery=0.85),
         bioplastic_model=PlaceholderBioplasticModel(conversion_yield=0.40),
     )
 

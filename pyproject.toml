@@ -17,6 +17,9 @@ dev = [
     "pytest>=7.0",
     "ruff>=0.1.0",
 ]
+dashboard = [
+    "streamlit>=1.28",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

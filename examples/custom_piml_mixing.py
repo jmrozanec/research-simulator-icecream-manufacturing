@@ -21,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from icecream_simulator.schemas import RawMaterials, MixingInput, MixingOutput
 from icecream_simulator.models import (
     MixingModelBase,
-    PlaceholderFiltrationModel,
     PlaceholderBioplasticModel,
     PlaceholderMixingModel,
 )
@@ -129,7 +128,8 @@ def main() -> None:
         shear_rate=150.0,
         temperature=278.15,  # 5 °C
         mixing_time=360.0,
-        solids_fraction=0.10,
+        interface_flush_L=5.0,
+        cleaning_water_inflow_L=60.0,
         pathway="PHA",
     )
 

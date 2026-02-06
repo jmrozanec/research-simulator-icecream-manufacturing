@@ -1,6 +1,6 @@
 # Ice Cream Production & Waste-to-Plastic Simulator
 
-A modular Python simulation framework for integrated **ice cream manufacturing** and **waste-to-plastic conversion**. Designed for pluggable Physics-Informed Machine Learning (PIML) and external process models.
+A modular Python simulation framework for integrated **ice cream manufacturing** and **waste-to-plastic conversion**. Uses a **Mass Balance + Operational Loss** model: ice cream is a closed-loop system; wastewater comes from cleaning water and product loss (shrinkage).
 
 ## Process Flow
 
@@ -9,29 +9,43 @@ Raw Materials (Milk, Cream, Sugar, Stabilizers, Water)
         │
         ▼
 ┌─────────────────────────────────────┐
-│  Mixing (PIML)                      │  ← Pluggable: predict viscosity, thermal properties
-│  Shear rate, ingredient ratios      │
+│  Mixing (PIML)                      │  ← Pluggable: viscosity, thermal properties
 └─────────────────────────────────────┘
         │
         ▼
 ┌─────────────────────────────────────┐
-│  Wastewater Filtration              │  ← Pluggable: separation efficiency model
-│  Product vs. waste stream           │
+│  Production (ProductionEngine)      │  Mass balance: Output = (Input + Air) - Shrinkage
+│  Adhesion loss + Interface flush    │  CalculateShrinkage()
 └─────────────────────────────────────┘
         │
         ▼
 ┌─────────────────────────────────────┐
-│  Bioplastic Conversion              │  ← Pluggable: PHA/PLA from organics
-│  Sugar/organics → bioplastics       │
+│  Wastewater (WasteLogic)            │  Cleaning water + product loss → BOD, FOG
+│  State: CLEANING or IDLE→RUNNING    │  GenerateWastewater()
+└─────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────┐
+│  Bioplastic Conversion              │  PHA/PLA from wastewater organics
 └─────────────────────────────────────┘
 ```
 
+## Mass Balance Logic
+
+- **Total_Output_Volume** = (Raw_Material_Input + Air_Overrun) - System_Shrinkage
+- **Shrinkage** = Adhesion loss (tank/pipe) + Interface flush (start-of-run discard)
+- **Wastewater** = Cleaning_Water_Inflow + System_Shrinkage
+- **BOD/FOG** scale with product loss (recipe fat/sugar content)
+
+If Product_Loss ↑ → Wastewater_BOD ↑, IceCream_Output ↓
+
 ## Features
 
-- **Modular ABC interfaces** for Mixing, Filtration, and Bioplastic Conversion models
-- **Mass and energy balance** tracking across the pipeline
-- **Pydantic schemas** for type-safe input/output
-- **JSON-ready reports** via `SimulationReport.model_dump()`
+- **ProductionEngine**: `CalculateShrinkage()`, mass balance
+- **WasteLogic**: `GenerateWastewater()` with BOD/FOG from recipe
+- **State machine**: IDLE, RUNNING, CLEANING
+- **Pluggable PIML** mixing and bioplastic models
+- **Pydantic schemas** for type safety
 
 ## Installation
 
@@ -48,79 +62,43 @@ from icecream_simulator import (
     RawMaterials,
     SimulationRunner,
     PlaceholderMixingModel,
-    PlaceholderFiltrationModel,
     PlaceholderBioplasticModel,
 )
 
 runner = SimulationRunner(
     mixing_model=PlaceholderMixingModel(),
-    filtration_model=PlaceholderFiltrationModel(product_recovery=0.85),
     bioplastic_model=PlaceholderBioplasticModel(conversion_yield=0.40),
 )
 
 raw_materials = RawMaterials(milk=100, cream=30, sugar=25, stabilizers=2, water=43)
-report = runner.run(raw_materials)
-
-# JSON-ready output
-print(report.model_dump())
-```
-
-## Pluggable Models
-
-### Custom PIML Mixing Model
-
-Implement `MixingModelBase` and pass it to `SimulationRunner`:
-
-```python
-from icecream_simulator.models import MixingModelBase
-from icecream_simulator.schemas import MixingInput, MixingOutput
-
-class MyPIMLMixingModel(MixingModelBase):
-    def predict(self, input_data: MixingInput) -> MixingOutput:
-        # Your PIML / neural network / surrogate model here
-        return MixingOutput(
-            viscosity=...,
-            thermal_conductivity=...,
-            specific_heat=...,
-            product_mass=input_data.raw_materials.total_mass,
-            energy_consumed=...,
-        )
-
-runner = SimulationRunner(
-    mixing_model=MyPIMLMixingModel(),
-    filtration_model=PlaceholderFiltrationModel(),
-    bioplastic_model=PlaceholderBioplasticModel(),
+report = runner.run(
+    raw_materials,
+    interface_flush_L=5.0,
+    cleaning_water_inflow_L=80.0,
 )
+print(report.total_product_mass, report.metadata["bod_mg_L"])
 ```
 
-See `examples/custom_piml_mixing.py` for a full example with a Carreau-Yasuda-style shear-thinning model.
-
-### Custom Filtration Model
-
-Implement `FiltrationModelBase`:
+## ProductionEngine & WasteLogic
 
 ```python
-from icecream_simulator.models import FiltrationModelBase
-from icecream_simulator.schemas import FiltrationInput, FiltrationOutput
+from icecream_simulator import ProductionEngine, WasteLogic, IceCreamRecipe
+from icecream_simulator.schemas import RawMaterials
 
-class MyFiltrationModel(FiltrationModelBase):
-    def predict(self, input_data: FiltrationInput) -> FiltrationOutput:
-        # Your membrane/filtration model here
-        return FiltrationOutput(...)
-```
+engine = ProductionEngine(adhesion_loss_fraction=0.005)
+shrinkage = engine.calculate_shrinkage(
+    mix_volume_L=200.0,
+    tank_surface_area_m2=10.0,
+    interface_flush_L=5.0,
+)
 
-### Custom Bioplastic Model
-
-Implement `BioplasticConversionModelBase`:
-
-```python
-from icecream_simulator.models import BioplasticConversionModelBase
-from icecream_simulator.schemas import BioplasticConversionInput, BioplasticConversionOutput
-
-class MyBioplasticModel(BioplasticConversionModelBase):
-    def predict(self, input_data: BioplasticConversionInput) -> BioplasticConversionOutput:
-        # Your conversion kinetics model here
-        return BioplasticConversionOutput(...)
+recipe = IceCreamRecipe.from_raw_materials(raw_materials)
+waste = WasteLogic().generate_wastewater(
+    cleaning_water_inflow_L=80.0,
+    system_shrinkage_kg=shrinkage.total_system_shrinkage_kg,
+    recipe=recipe,
+)
+# waste.bod_mg_L, waste.fog_mg_L, waste.organic_content_kg
 ```
 
 ## Project Structure
@@ -128,15 +106,12 @@ class MyBioplasticModel(BioplasticConversionModelBase):
 ```
 src/icecream_simulator/
 ├── __init__.py
-├── schemas.py          # Pydantic data models
+├── schemas.py          # RawMaterials, IceCreamRecipe, Wastewater, ShrinkageResult, State
+├── production.py       # ProductionEngine, WasteLogic
 ├── runner.py           # SimulationRunner
 └── models/
-    ├── base.py         # ABC interfaces (MixingModelBase, etc.)
-    └── placeholders.py # Default implementations
-
-examples/
-├── basic_usage.py
-└── custom_piml_mixing.py
+    ├── base.py         # MixingModelBase, BioplasticConversionModelBase
+    └── placeholders.py # PlaceholderMixingModel, PlaceholderBioplasticModel
 ```
 
 ## Running Examples
@@ -144,8 +119,16 @@ examples/
 ```bash
 python examples/basic_usage.py
 python examples/custom_piml_mixing.py
+python examples/sample_run_verbose.py   # Detailed data flow trace
+```
+
+## Monitoring Dashboard
+
+```bash
+pip install streamlit
+streamlit run examples/dashboard.py
 ```
 
 ## License
 
-MIT
+Apache License 2.0

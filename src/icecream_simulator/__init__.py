@@ -3,46 +3,52 @@ Ice Cream Production and Waste-to-Plastic Conversion Simulator.
 
 A modular simulation framework for integrated ice cream manufacturing
 and bioplastic conversion from wastewater streams.
+
+Mass balance model: Ice cream is a closed-loop system. Wastewater comes
+from cleaning water + operational loss (shrinkage).
 """
 
 from icecream_simulator.schemas import (
     RawMaterials,
     MixingInput,
     MixingOutput,
-    FiltrationInput,
-    FiltrationOutput,
     BioplasticConversionInput,
     BioplasticConversionOutput,
     SimulationReport,
     MassBalanceState,
+    State,
+    IceCreamRecipe,
+    ShrinkageResult,
+    Wastewater,
 )
 from icecream_simulator.models import (
     MixingModelBase,
-    FiltrationModelBase,
     BioplasticConversionModelBase,
     PlaceholderMixingModel,
-    PlaceholderFiltrationModel,
     PlaceholderBioplasticModel,
 )
+from icecream_simulator.production import ProductionEngine, WasteLogic
 from icecream_simulator.runner import SimulationRunner
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "RawMaterials",
     "MixingInput",
     "MixingOutput",
-    "FiltrationInput",
-    "FiltrationOutput",
     "BioplasticConversionInput",
     "BioplasticConversionOutput",
     "SimulationReport",
     "MassBalanceState",
+    "State",
+    "IceCreamRecipe",
+    "ShrinkageResult",
+    "Wastewater",
     "MixingModelBase",
-    "FiltrationModelBase",
     "BioplasticConversionModelBase",
     "PlaceholderMixingModel",
-    "PlaceholderFiltrationModel",
     "PlaceholderBioplasticModel",
+    "ProductionEngine",
+    "WasteLogic",
     "SimulationRunner",
 ]
