@@ -40,6 +40,7 @@ from icecream_simulator.batch_models import (
     BioplasticOutput,
     Composition,
     ContaminantLoad,
+    MaterialBatchCycleReport,
 )
 from icecream_simulator.run_full_cycle import run_full_cycle, print_report
 from icecream_simulator.mixer import MixerModelBase, DefaultMixerModel
@@ -77,6 +78,7 @@ __all__ = [
     "BioplasticOutput",
     "Composition",
     "ContaminantLoad",
+    "MaterialBatchCycleReport",
     "run_full_cycle",
     "print_report",
     "MixerModelBase",

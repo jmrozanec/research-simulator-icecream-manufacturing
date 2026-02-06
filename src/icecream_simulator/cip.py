@@ -67,6 +67,10 @@ def run_cip(inputs: CIPInput) -> WastewaterStream:
     bod_mg_L = (bod_kg * 1e6) / total_volume_L
     cod_mg_L = (cod_kg * 1e6) / total_volume_L
 
+    # FOG: from fat in residue (parity with Pipeline 1 Wastewater.fog_mg_L)
+    fat_into_water_kg = residue_into_water_kg * residue.composition.fat
+    fog_mg_L = (fat_into_water_kg * 1e6) / total_volume_L if total_volume_L > 0 else 0.0
+
     return WastewaterStream(
         volume_L=total_volume_L,
         mass_kg=total_mass_kg,
@@ -75,5 +79,6 @@ def run_cip(inputs: CIPInput) -> WastewaterStream:
         dissolved_sugar_kg=dissolved_sugar_kg,
         cod_mg_L=cod_mg_L,
         bod_mg_L=bod_mg_L,
+        fog_mg_L=fog_mg_L,
         metadata={"detergent": inputs.detergent_type, "wash_efficiency": eff},
     )

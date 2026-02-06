@@ -121,6 +121,7 @@ class WastewaterStream(BaseModel):
     dissolved_sugar_kg: float = Field(ge=0, description="Dissolved sugar mass (kg)")
     cod_mg_L: float = Field(ge=0, description="Chemical Oxygen Demand (mg/L)")
     bod_mg_L: float = Field(ge=0, description="Biological Oxygen Demand (mg/L)")
+    fog_mg_L: float = Field(ge=0, description="Fats, Oils, Grease (mg/L)")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
@@ -179,3 +180,23 @@ class BioplasticOutput(BaseModel):
     sugar_consumed_kg: float = Field(ge=0, description="Sugar mass consumed (kg)")
     yield_coefficient: float = Field(ge=0, description="g plastic per g sugar used")
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Typed report for full cycle (parity with SimulationReport)
+# ---------------------------------------------------------------------------
+
+class MaterialBatchCycleReport(BaseModel):
+    """
+    Typed report for one MaterialBatch cycle.
+    Includes mass_balance_closed for parity with Pipeline 1 SimulationReport.
+    """
+
+    raw_materials_kg: float = 0.0
+    product_to_freezer_kg: float = 0.0
+    ice_cream_volume_L: float = 0.0  # with air overrun
+    total_wastewater_mass_kg: float = 0.0
+    total_bioplastic_mass_kg: float = 0.0
+    total_energy_consumed_J: float = 0.0
+    mass_balance_closed: bool = True
+    report_dict: dict[str, Any] = Field(default_factory=dict)

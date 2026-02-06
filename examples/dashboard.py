@@ -60,6 +60,9 @@ else:
     tank_surface_m2 = st.sidebar.number_input("Tank surface (m²)", value=10.0, min_value=0.1)
     water_volume_L = st.sidebar.number_input("CIP water (L)", value=80.0, min_value=0.0)
     bioplastic_yield = st.sidebar.slider("Bioplastic yield (g PHA / g sugar)", 0.1, 0.8, 0.4, 0.05)
+    air_overrun = st.sidebar.slider("Air overrun", 0.0, 1.0, 0.5, 0.05)
+    interface_flush_L = st.sidebar.number_input("Interface flush (L)", value=5.0, min_value=0.0)
+    include_cleaning_phase = st.sidebar.checkbox("Include cleaning phase", value=True)
 demo_delay = st.sidebar.slider("Stage delay (s) — for demo effect", 0.0, 3.0, 1.0, 0.5)
 run_btn = st.sidebar.button("▶ Run simulation")
 
@@ -147,17 +150,24 @@ if run_btn:
             mixing_model=DefaultMixerModel(),
             bioconversion_model=DefaultBioconversionModel(yield_coefficient=float(bioplastic_yield)),
             on_stage_complete=on_stage_complete,
+            air_overrun=float(air_overrun),
+            interface_flush_L=float(interface_flush_L),
+            include_cleaning_phase=include_cleaning_phase,
         )
         progress_bar.progress(1.0, text="Done!")
         status_container.success("Simulation complete.")
         c1, c2, c3, c4 = summary_container.columns(4)
         c1.metric("Product to freezer", f"{report['mixer']['product_to_freezer_kg']:.1f} kg")
-        c2.metric("Wastewater", f"{report['cip']['wastewater_mass_kg']:.1f} kg")
+        c2.metric("Ice cream vol. (L)", f"{report['mixer'].get('ice_cream_volume_L', 0):.1f}")
         c3.metric("Bioplastic (PHA)", f"{report['bioconversion']['bioplastic_mass_kg']:.2f} kg")
         c4.metric("Plastic / tonne input", f"{report['efficiency_summary']['plastic_kg_per_tonne_input']} kg")
         if report["filtration"]["maintenance_required"]:
             st.warning("⚠️ Filter maintenance required (saturation > 90%)")
-        report_expander.json(report)
+        if report["efficiency_summary"].get("mass_balance_closed", True):
+            st.success("✅ Mass balance closed")
+        else:
+            st.warning("⚠️ Mass balance not closed")
+        report_expander.json({k: v for k, v in report.items() if k != "typed_report"})
     else:
         runner = SimulationRunner(
             mixing_model=PlaceholderMixingModel(),

@@ -103,7 +103,7 @@ waste = WasteLogic().generate_wastewater(
 
 ## MaterialBatch Pipeline (Full Cycle)
 
-A second architecture centers on a **MaterialBatch** object that flows through every stage. Use it for rheology, residue, CIP, filtration (Darcy/fouling), and sugar-to-plastic conversion in one run.
+A second architecture centers on a **MaterialBatch** object that flows through every stage. For a **capabilities overview and sample run** (parameters + stage-by-stage outcomes) aimed at researchers developing physical/chemical sub-models, see **[docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md)**. Use it for rheology, residue, CIP, filtration (Darcy/fouling), and sugar-to-plastic conversion in one run.
 
 - **batch_models.py** — `MaterialBatch` (mass, T, μ, composition, COD/BOD), `WastewaterStream`, `RetentateStream`, `FilterState`, etc.
 - **mixer.py** — Power Law viscosity, power \(P = K \cdot \mu \cdot N^2 \cdot D^3\), residue = f(μ, surface area) → `ProductBatch` + `TankResidue`
@@ -111,6 +111,16 @@ A second architecture centers on a **MaterialBatch** object that flows through e
 - **filtration.py** — Darcy resistance, filter saturation; permeate + retentate; maintenance flag when saturation > 90%
 - **bioconversion.py** — \(Mass_{PHA} = Mass_{Sugar} \times Yield_{Coefficient}\) (e.g. Ralstonia eutropha logic)
 - **run_full_cycle.py** — One full cycle and efficiency/plastic yield report
+
+Pipeline 2 now includes all capabilities of Pipeline 1 without duplicate phases:
+
+- **Air overrun** — `ice_cream_volume_L = (product_to_freezer_kg / ρ) × (1 + air_overrun)`.
+- **Interface flush** — Start-of-run discard (L) subtracted from product and added to CIP feed (same loss path as residue).
+- **Include cleaning phase** — When `include_cleaning_phase=False`, CIP/filtration/bioconversion are skipped (zero wastewater); no extra phase.
+- **Mixing parameters** — `temperature_K`, `mixing_time_s`, `rpm` passed into the mixer.
+- **Thermal outputs** — `thermal_conductivity_W_mK` and `specific_heat_J_kgK` from composition (reported in mixer).
+- **FOG** — `WastewaterStream.fog_mg_L` from fat in residue (CIP).
+- **Typed report** — `MaterialBatchCycleReport` and `mass_balance_closed` (mass in = product + residue + interface flush).
 
 Run the full cycle:
 

@@ -19,6 +19,19 @@ from icecream_simulator.bioconversion import (
     BioconversionModelBase,
     DefaultBioconversionModel,
 )
+from icecream_simulator.batch_models import (
+    TankResidue,
+    WastewaterStream,
+    MaterialBatchCycleReport,
+)
+
+# Mix density (kg/L) for volume and interface flush (parity with ProductionEngine)
+MIX_DENSITY_KG_L = 1.05
+
+
+def _thermal_properties_from_composition(water_fraction: float) -> tuple[float, float]:
+    """Thermal conductivity (W/(m·K)) and specific heat (J/(kg·K)) from water fraction (parity with PIML)."""
+    return (0.4 + 0.2 * water_fraction, 3500.0 + 500.0 * water_fraction)
 
 
 def run_full_cycle(
@@ -29,19 +42,34 @@ def run_full_cycle(
     mixing_model: MixerModelBase | None = None,
     bioconversion_model: BioconversionModelBase | None = None,
     on_stage_complete: Callable[[str, StageResult, dict], None] | None = None,
+    air_overrun: float = 0.5,
+    interface_flush_L: float = 5.0,
+    include_cleaning_phase: bool = True,
+    temperature_K: float = 278.0,
+    mixing_time_s: float = 300.0,
+    rpm: float = 60.0,
 ) -> dict:
     """
-    Run one full cycle: Mixing → CIP → Filtration → Bioconversion.
-    Returns a report dict with efficiency and plastic yield.
+    Run one full cycle: Mixing → [CIP → Filtration → Bioconversion when include_cleaning_phase].
+    Single ice cream process: no duplicate phases. Interface flush is applied as additional
+    loss from mixer output (same as P1); residue + interface flush go to CIP together.
+
+    Returns a report dict with efficiency, plastic yield, and mass_balance_closed.
 
     Args:
         raw_materials: Input recipe; default 200 kg batch if None.
         tank_surface_area_m2: Tank surface for residue model.
-        water_volume_L: CIP water volume.
+        water_volume_L: CIP water volume (used only when include_cleaning_phase=True).
         bioplastic_yield_coefficient: Used only if bioconversion_model is None.
         mixing_model: Pluggable mixer; uses DefaultMixerModel if None.
         bioconversion_model: Pluggable bioconversion; uses DefaultBioconversionModel if None.
         on_stage_complete: Optional callback (stage_name, StageResult, cumulative) for monitoring.
+        air_overrun: Volume overrun fraction (0.5 = 50%) for ice cream volume.
+        interface_flush_L: Start-of-run discard (L); subtracted from product, added to CIP feed.
+        include_cleaning_phase: If False, skip CIP/filtration/bioconversion (no wastewater path).
+        temperature_K: Initial mix temperature (K) for mixer.
+        mixing_time_s: Mixing duration (s).
+        rpm: Mixer RPM.
     """
     raw = raw_materials or RawMaterials(
         milk=100.0, cream=30.0, sugar=25.0, stabilizers=2.0, water=43.0
@@ -53,29 +81,55 @@ def run_full_cycle(
     )
     cumulative: dict = {"product_kg": 0.0, "energy_consumed": 0.0}
 
-    # --- 1. Mixer ---
+    # --- 1. Mixer (single phase: rheology + residue) ---
     mixer_in = MixerInput(
         raw_materials=raw,
         tank_surface_area_m2=tank_surface_area_m2,
-        rpm=60.0,
-        mixing_time_s=300.0,
+        rpm=rpm,
+        mixing_time_s=mixing_time_s,
+        initial_temperature_K=temperature_K,
     )
     product_batch, tank_residue, power_W = mixer_impl.run(mixer_in)
     product_kg = product_batch.mass_kg
     residue_kg = tank_residue.mass_kg
-    mixer_efficiency = (product_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
-    cumulative["product_kg"] = product_kg
-    cumulative["energy_consumed"] = power_W  # J not tracked per-stage; use power as proxy
+
+    # Interface flush: additional operational loss (parity with P1). Not a separate phase:
+    # subtract from product, add to the mass that goes to CIP.
+    interface_flush_kg = min(interface_flush_L * MIX_DENSITY_KG_L, product_kg)
+    product_to_freezer_kg = product_kg - interface_flush_kg
+    # Combined residue for CIP = tank residue + interface flush (same composition as product)
+    cip_residue = TankResidue(
+        mass_kg=residue_kg + interface_flush_kg,
+        composition=product_batch.composition,
+        viscosity_Pa_s=product_batch.viscosity_Pa_s,
+    )
+
+    mixer_efficiency = (
+        (product_to_freezer_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
+    )
+    cumulative["product_kg"] = product_to_freezer_kg
+    cumulative["energy_consumed"] = power_W
+
+    thermal_conductivity, specific_heat = _thermal_properties_from_composition(
+        product_batch.composition.water
+    )
+    ice_cream_volume_L = (product_to_freezer_kg / MIX_DENSITY_KG_L) * (1.0 + air_overrun)
 
     if on_stage_complete:
         mb = MassBalanceState(
             stage="mixer",
             mass_in=total_input_kg,
-            mass_out=product_kg + residue_kg,
+            mass_out=product_to_freezer_kg + cip_residue.mass_kg,
             energy_consumed=power_W,
-            mass_product=product_kg,
-            mass_waste=residue_kg,
-            metadata={"viscosity": product_batch.viscosity_Pa_s, "residue_kg": residue_kg},
+            mass_product=product_to_freezer_kg,
+            mass_waste=cip_residue.mass_kg,
+            metadata={
+                "viscosity": product_batch.viscosity_Pa_s,
+                "residue_kg": residue_kg,
+                "interface_flush_kg": interface_flush_kg,
+                "thermal_conductivity": thermal_conductivity,
+                "specific_heat": specific_heat,
+            },
         )
         on_stage_complete(
             "mixer",
@@ -83,32 +137,54 @@ def run_full_cycle(
                 stage_name="mixer",
                 mass_balance=mb,
                 outputs={
-                    "product_to_freezer_kg": product_kg,
+                    "product_to_freezer_kg": product_to_freezer_kg,
                     "tank_residue_kg": residue_kg,
+                    "interface_flush_kg": interface_flush_kg,
                     "viscosity_Pa_s": product_batch.viscosity_Pa_s,
                     "mixing_power_W": power_W,
+                    "thermal_conductivity_W_mK": thermal_conductivity,
+                    "specific_heat_J_kgK": specific_heat,
+                    "ice_cream_volume_L": ice_cream_volume_L,
                 },
                 model_used=mixer_impl.model_name,
             ),
             dict(cumulative),
         )
 
-    # --- 2. CIP ---
-    cip_in = CIPInput(
-        tank_residue=tank_residue,
-        water_volume_L=water_volume_L,
-    )
-    wastewater = run_cip(cip_in)
+    # --- 2. CIP (only when cleaning phase included; same phase, no duplicate) ---
+    if include_cleaning_phase:
+        cip_in = CIPInput(
+            tank_residue=cip_residue,
+            water_volume_L=water_volume_L,
+        )
+        wastewater = run_cip(cip_in)
+    else:
+        # No cleaning: zero wastewater (residue stays in tank until next clean)
+        wastewater = WastewaterStream(
+            volume_L=0.0,
+            mass_kg=0.0,
+            temperature_K=323.0,
+            tss_mg_L=0.0,
+            dissolved_sugar_kg=0.0,
+            cod_mg_L=0.0,
+            bod_mg_L=0.0,
+            fog_mg_L=0.0,
+        )
+        cip_in = CIPInput(tank_residue=cip_residue, water_volume_L=0.0)
 
     if on_stage_complete:
         mb = MassBalanceState(
             stage="cip",
-            mass_in=cip_in.water_volume_L * 1.0 + residue_kg,
+            mass_in=cip_in.water_volume_L * 1.0 + cip_residue.mass_kg,
             mass_out=wastewater.mass_kg,
             energy_consumed=0.0,
             mass_product=0.0,
             mass_waste=wastewater.mass_kg,
-            metadata={"tss_mg_L": wastewater.tss_mg_L, "bod_mg_L": wastewater.bod_mg_L},
+            metadata={
+                "tss_mg_L": wastewater.tss_mg_L,
+                "bod_mg_L": wastewater.bod_mg_L,
+                "fog_mg_L": wastewater.fog_mg_L,
+            },
         )
         on_stage_complete(
             "cip",
@@ -169,6 +245,10 @@ def run_full_cycle(
     )
     plastic_yield_from_total_input = (pha_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
 
+    # Mass balance: input = product to freezer + loss (residue + interface flush). Water is external.
+    total_out_kg = product_to_freezer_kg + cip_residue.mass_kg
+    mass_balance_closed = abs(total_input_kg - total_out_kg) < 1e-6
+
     if on_stage_complete:
         mb = MassBalanceState(
             stage="bioconversion",
@@ -197,13 +277,23 @@ def run_full_cycle(
         "inputs": {
             "raw_materials_kg": total_input_kg,
             "tank_surface_area_m2": tank_surface_area_m2,
-            "cleaning_water_L": water_volume_L,
+            "cleaning_water_L": water_volume_L if include_cleaning_phase else 0.0,
+            "air_overrun": air_overrun,
+            "interface_flush_L": interface_flush_L,
+            "include_cleaning_phase": include_cleaning_phase,
+            "temperature_K": temperature_K,
+            "mixing_time_s": mixing_time_s,
+            "rpm": rpm,
         },
         "mixer": {
-            "product_to_freezer_kg": product_kg,
+            "product_to_freezer_kg": product_to_freezer_kg,
+            "ice_cream_volume_L": ice_cream_volume_L,
             "tank_residue_kg": residue_kg,
+            "interface_flush_kg": interface_flush_kg,
             "mixing_power_W": power_W,
             "viscosity_Pa_s": product_batch.viscosity_Pa_s,
+            "thermal_conductivity_W_mK": thermal_conductivity,
+            "specific_heat_J_kgK": specific_heat,
             "mixer_efficiency_pct": round(mixer_efficiency, 2),
         },
         "cip": {
@@ -212,6 +302,7 @@ def run_full_cycle(
             "dissolved_sugar_kg": wastewater.dissolved_sugar_kg,
             "tss_mg_L": round(wastewater.tss_mg_L, 2),
             "bod_mg_L": round(wastewater.bod_mg_L, 2),
+            "fog_mg_L": round(wastewater.fog_mg_L, 2),
         },
         "filtration": {
             "permeate_volume_L": permeate.volume_L,
@@ -229,10 +320,23 @@ def run_full_cycle(
         },
         "efficiency_summary": {
             "product_recovery_pct": round(mixer_efficiency, 2),
-            "plastic_kg_per_tonne_input": round(pha_kg / (total_input_kg / 1000.0), 4),
+            "plastic_kg_per_tonne_input": round(
+                pha_kg / (total_input_kg / 1000.0), 4
+            ) if total_input_kg > 0 else 0.0,
             "maintenance_required": maintenance_flag,
+            "mass_balance_closed": mass_balance_closed,
         },
     }
+    report["typed_report"] = MaterialBatchCycleReport(
+        raw_materials_kg=total_input_kg,
+        product_to_freezer_kg=product_to_freezer_kg,
+        ice_cream_volume_L=ice_cream_volume_L,
+        total_wastewater_mass_kg=wastewater.mass_kg,
+        total_bioplastic_mass_kg=pha_kg,
+        total_energy_consumed_J=power_W,
+        mass_balance_closed=mass_balance_closed,
+        report_dict={k: v for k, v in report.items() if k != "typed_report"},
+    )
     return report
 
 
@@ -243,42 +347,58 @@ def print_report(report: dict) -> None:
     print("Full cycle report: Mixing → CIP → Filtration → Bioplastic")
     print("=" * 60)
     r = report
+    inp = r.get("inputs", {})
     print("\n--- INPUTS ---")
-    print(f"  Raw materials (kg):     {r['inputs']['raw_materials_kg']:.2f}")
-    print(f"  Tank surface area (m²): {r['inputs']['tank_surface_area_m2']:.2f}")
-    print(f"  Cleaning water (L):     {r['inputs']['cleaning_water_L']:.2f}")
+    print(f"  Raw materials (kg):     {inp.get('raw_materials_kg', 0):.2f}")
+    print(f"  Tank surface area (m²): {inp.get('tank_surface_area_m2', 0):.2f}")
+    print(f"  Cleaning water (L):     {inp.get('cleaning_water_L', 0):.2f}")
+    print(f"  Air overrun:            {inp.get('air_overrun', 0.5)}")
+    print(f"  Interface flush (L):    {inp.get('interface_flush_L', 0):.2f}")
+    print(f"  Include cleaning:      {inp.get('include_cleaning_phase', True)}")
+    print(f"  Temperature (K):       {inp.get('temperature_K', 278):.1f}  RPM: {inp.get('rpm', 60)}")
 
+    mix = r.get("mixer", {})
     print("\n--- MIXER ---")
-    print(f"  Product to freezer (kg): {r['mixer']['product_to_freezer_kg']:.2f}")
-    print(f"  Tank residue (kg):       {r['mixer']['tank_residue_kg']:.2f}")
-    print(f"  Mixing power (W):        {r['mixer']['mixing_power_W']:.2f}")
-    print(f"  Viscosity (Pa·s):        {r['mixer']['viscosity_Pa_s']:.4f}")
-    print(f"  Mixer efficiency (%):    {r['mixer']['mixer_efficiency_pct']}")
+    print(f"  Product to freezer (kg): {mix.get('product_to_freezer_kg', 0):.2f}")
+    print(f"  Ice cream volume (L):    {mix.get('ice_cream_volume_L', 0):.2f}")
+    print(f"  Tank residue (kg):       {mix.get('tank_residue_kg', 0):.2f}")
+    print(f"  Interface flush (kg):    {mix.get('interface_flush_kg', 0):.2f}")
+    print(f"  Mixing power (W):        {mix.get('mixing_power_W', 0):.2f}")
+    print(f"  Viscosity (Pa·s):       {mix.get('viscosity_Pa_s', 0):.4f}")
+    print(f"  Thermal cond. (W/(m·K)): {mix.get('thermal_conductivity_W_mK', 0):.3f}")
+    print(f"  Specific heat (J/(kg·K)): {mix.get('specific_heat_J_kgK', 0):.0f}")
+    print(f"  Mixer efficiency (%):    {mix.get('mixer_efficiency_pct', 0)}")
 
+    cip = r.get("cip", {})
     print("\n--- CIP (Wastewater) ---")
-    print(f"  Wastewater volume (L):   {r['cip']['wastewater_volume_L']:.2f}")
-    print(f"  Dissolved sugar (kg):     {r['cip']['dissolved_sugar_kg']:.2f}")
-    print(f"  TSS (mg/L):              {r['cip']['tss_mg_L']}")
-    print(f"  BOD (mg/L):              {r['cip']['bod_mg_L']}")
+    print(f"  Wastewater volume (L):   {cip.get('wastewater_volume_L', 0):.2f}")
+    print(f"  Dissolved sugar (kg):    {cip.get('dissolved_sugar_kg', 0):.2f}")
+    print(f"  TSS (mg/L):              {cip.get('tss_mg_L', 0)}")
+    print(f"  BOD (mg/L):              {cip.get('bod_mg_L', 0)}")
+    print(f"  FOG (mg/L):              {cip.get('fog_mg_L', 0)}")
 
+    flt = r.get("filtration", {})
     print("\n--- FILTRATION ---")
-    print(f"  Permeate volume (L):     {r['filtration']['permeate_volume_L']:.2f}")
-    print(f"  Retentate mass (kg):     {r['filtration']['retentate_mass_kg']:.2f}")
-    print(f"  Retentate sugar (kg):    {r['filtration']['retentate_sugar_kg']:.2f}")
-    print(f"  Filter saturation (%):   {r['filtration']['filter_saturation_pct']}")
-    print(f"  Maintenance required:     {r['filtration']['maintenance_required']}")
+    print(f"  Permeate volume (L):     {flt.get('permeate_volume_L', 0):.2f}")
+    print(f"  Retentate mass (kg):     {flt.get('retentate_mass_kg', 0):.2f}")
+    print(f"  Retentate sugar (kg):    {flt.get('retentate_sugar_kg', 0):.2f}")
+    print(f"  Filter saturation (%):   {flt.get('filter_saturation_pct', 0)}")
+    print(f"  Maintenance required:    {flt.get('maintenance_required', False)}")
 
+    bio = r.get("bioconversion", {})
     print("\n--- BIOCONVERSION (Sugar → PHA) ---")
-    print(f"  Bioplastic produced (kg): {r['bioconversion']['bioplastic_mass_kg']:.4f}")
-    print(f"  Sugar consumed (kg):      {r['bioconversion']['sugar_consumed_kg']:.4f}")
-    print(f"  Yield coefficient:       {r['bioconversion']['yield_coefficient']}")
-    print(f"  Yield from sugar (%):    {r['bioconversion']['plastic_yield_from_sugar_pct']}")
-    print(f"  Yield from total input (%): {r['bioconversion']['plastic_yield_from_input_pct']}")
+    print(f"  Bioplastic produced (kg): {bio.get('bioplastic_mass_kg', 0):.4f}")
+    print(f"  Sugar consumed (kg):      {bio.get('sugar_consumed_kg', 0):.4f}")
+    print(f"  Yield coefficient:       {bio.get('yield_coefficient', 0)}")
+    print(f"  Yield from sugar (%):    {bio.get('plastic_yield_from_sugar_pct', 0)}")
+    print(f"  Yield from input (%):    {bio.get('plastic_yield_from_input_pct', 0)}")
 
+    eff = r.get("efficiency_summary", {})
     print("\n--- EFFICIENCY SUMMARY ---")
-    print(f"  Product recovery (%):    {r['efficiency_summary']['product_recovery_pct']}")
-    print(f"  Plastic (kg/tonne input): {r['efficiency_summary']['plastic_kg_per_tonne_input']}")
-    print(f"  Maintenance required:     {r['efficiency_summary']['maintenance_required']}")
+    print(f"  Product recovery (%):    {eff.get('product_recovery_pct', 0)}")
+    print(f"  Plastic (kg/tonne input): {eff.get('plastic_kg_per_tonne_input', 0)}")
+    print(f"  Maintenance required:    {eff.get('maintenance_required', False)}")
+    print(f"  Mass balance closed:     {eff.get('mass_balance_closed', True)}")
     print("=" * 60)
 
 
