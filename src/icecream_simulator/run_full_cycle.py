@@ -2,15 +2,23 @@
 Main execution: one full cycle
   Mixing → Washing (CIP) → Filtering → Plastic Conversion
 with a report on efficiency and plastic yield.
+Supports optional on_stage_complete callback for dashboards and
+pluggable mixing_model / bioconversion_model for extensibility.
 """
 
 from __future__ import annotations
 
-from icecream_simulator.schemas import RawMaterials
-from icecream_simulator.mixer import MixerInput, run_mixer
+from collections.abc import Callable
+
+from icecream_simulator.schemas import RawMaterials, MassBalanceState, StageResult
+from icecream_simulator.mixer import MixerInput, MixerModelBase, DefaultMixerModel, run_mixer
 from icecream_simulator.cip import CIPInput, run_cip
 from icecream_simulator.filtration import FiltrationConfig, run_filtration
-from icecream_simulator.bioconversion import run_bioconversion
+from icecream_simulator.bioconversion import (
+    run_bioconversion,
+    BioconversionModelBase,
+    DefaultBioconversionModel,
+)
 
 
 def run_full_cycle(
@@ -18,15 +26,32 @@ def run_full_cycle(
     tank_surface_area_m2: float = 10.0,
     water_volume_L: float = 80.0,
     bioplastic_yield_coefficient: float = 0.4,
+    mixing_model: MixerModelBase | None = None,
+    bioconversion_model: BioconversionModelBase | None = None,
+    on_stage_complete: Callable[[str, StageResult, dict], None] | None = None,
 ) -> dict:
     """
     Run one full cycle: Mixing → CIP → Filtration → Bioconversion.
     Returns a report dict with efficiency and plastic yield.
+
+    Args:
+        raw_materials: Input recipe; default 200 kg batch if None.
+        tank_surface_area_m2: Tank surface for residue model.
+        water_volume_L: CIP water volume.
+        bioplastic_yield_coefficient: Used only if bioconversion_model is None.
+        mixing_model: Pluggable mixer; uses DefaultMixerModel if None.
+        bioconversion_model: Pluggable bioconversion; uses DefaultBioconversionModel if None.
+        on_stage_complete: Optional callback (stage_name, StageResult, cumulative) for monitoring.
     """
     raw = raw_materials or RawMaterials(
         milk=100.0, cream=30.0, sugar=25.0, stabilizers=2.0, water=43.0
     )
     total_input_kg = raw.total_mass
+    mixer_impl = mixing_model or DefaultMixerModel()
+    bioconv_impl = bioconversion_model or DefaultBioconversionModel(
+        yield_coefficient=bioplastic_yield_coefficient
+    )
+    cumulative: dict = {"product_kg": 0.0, "energy_consumed": 0.0}
 
     # --- 1. Mixer ---
     mixer_in = MixerInput(
@@ -35,10 +60,38 @@ def run_full_cycle(
         rpm=60.0,
         mixing_time_s=300.0,
     )
-    product_batch, tank_residue, power_W = run_mixer(mixer_in)
+    product_batch, tank_residue, power_W = mixer_impl.run(mixer_in)
     product_kg = product_batch.mass_kg
     residue_kg = tank_residue.mass_kg
     mixer_efficiency = (product_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
+    cumulative["product_kg"] = product_kg
+    cumulative["energy_consumed"] = power_W  # J not tracked per-stage; use power as proxy
+
+    if on_stage_complete:
+        mb = MassBalanceState(
+            stage="mixer",
+            mass_in=total_input_kg,
+            mass_out=product_kg + residue_kg,
+            energy_consumed=power_W,
+            mass_product=product_kg,
+            mass_waste=residue_kg,
+            metadata={"viscosity": product_batch.viscosity_Pa_s, "residue_kg": residue_kg},
+        )
+        on_stage_complete(
+            "mixer",
+            StageResult(
+                stage_name="mixer",
+                mass_balance=mb,
+                outputs={
+                    "product_to_freezer_kg": product_kg,
+                    "tank_residue_kg": residue_kg,
+                    "viscosity_Pa_s": product_batch.viscosity_Pa_s,
+                    "mixing_power_W": power_W,
+                },
+                model_used=mixer_impl.model_name,
+            ),
+            dict(cumulative),
+        )
 
     # --- 2. CIP ---
     cip_in = CIPInput(
@@ -46,6 +99,27 @@ def run_full_cycle(
         water_volume_L=water_volume_L,
     )
     wastewater = run_cip(cip_in)
+
+    if on_stage_complete:
+        mb = MassBalanceState(
+            stage="cip",
+            mass_in=cip_in.water_volume_L * 1.0 + residue_kg,
+            mass_out=wastewater.mass_kg,
+            energy_consumed=0.0,
+            mass_product=0.0,
+            mass_waste=wastewater.mass_kg,
+            metadata={"tss_mg_L": wastewater.tss_mg_L, "bod_mg_L": wastewater.bod_mg_L},
+        )
+        on_stage_complete(
+            "cip",
+            StageResult(
+                stage_name="cip",
+                mass_balance=mb,
+                outputs=wastewater.model_dump(),
+                model_used="CIP",
+            ),
+            dict(cumulative),
+        )
 
     # --- 3. Filtration ---
     config = FiltrationConfig(
@@ -55,14 +129,69 @@ def run_full_cycle(
     permeate, retentate, filter_state = run_filtration(wastewater, config)
     maintenance_flag = filter_state.maintenance_required
 
+    if on_stage_complete:
+        mb = MassBalanceState(
+            stage="filtration",
+            mass_in=wastewater.mass_kg,
+            mass_out=permeate.mass_kg + retentate.mass_kg,
+            energy_consumed=0.0,
+            mass_product=permeate.mass_kg,
+            mass_waste=retentate.mass_kg,
+            metadata={
+                "filter_saturation": filter_state.saturation_fraction,
+                "maintenance_required": maintenance_flag,
+                "retentate_sugar_kg": retentate.sugar_mass_kg,
+            },
+        )
+        on_stage_complete(
+            "filtration",
+            StageResult(
+                stage_name="filtration",
+                mass_balance=mb,
+                outputs={
+                    "permeate_volume_L": permeate.volume_L,
+                    "retentate_mass_kg": retentate.mass_kg,
+                    "retentate_sugar_kg": retentate.sugar_mass_kg,
+                    "filter_saturation_pct": filter_state.saturation_fraction * 100,
+                    "maintenance_required": maintenance_flag,
+                },
+                model_used="Filtration",
+            ),
+            dict(cumulative),
+        )
+
     # --- 4. Bioconversion ---
-    bioplastic_out = run_bioconversion(retentate, yield_coefficient=bioplastic_yield_coefficient)
+    bioplastic_out = bioconv_impl.run(retentate)
     pha_kg = bioplastic_out.mass_kg
     sugar_for_plastic_kg = bioplastic_out.sugar_consumed_kg
     plastic_yield_from_sugar = (
         (pha_kg / sugar_for_plastic_kg * 100.0) if sugar_for_plastic_kg > 0 else 0.0
     )
     plastic_yield_from_total_input = (pha_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
+
+    if on_stage_complete:
+        mb = MassBalanceState(
+            stage="bioconversion",
+            mass_in=retentate.sugar_mass_kg,
+            mass_out=pha_kg,
+            energy_consumed=0.0,
+            mass_product=pha_kg,
+            mass_waste=0.0,
+            metadata={
+                "yield_coefficient": bioplastic_out.yield_coefficient,
+                "sugar_consumed_kg": sugar_for_plastic_kg,
+            },
+        )
+        on_stage_complete(
+            "bioconversion",
+            StageResult(
+                stage_name="bioconversion",
+                mass_balance=mb,
+                outputs=bioplastic_out.model_dump(),
+                model_used=bioconv_impl.model_name,
+            ),
+            {**cumulative, "bioplastic_kg": pha_kg},
+        )
 
     report = {
         "inputs": {
@@ -94,7 +223,7 @@ def run_full_cycle(
         "bioconversion": {
             "bioplastic_mass_kg": pha_kg,
             "sugar_consumed_kg": sugar_for_plastic_kg,
-            "yield_coefficient": bioplastic_yield_coefficient,
+            "yield_coefficient": bioplastic_out.yield_coefficient,
             "plastic_yield_from_sugar_pct": round(plastic_yield_from_sugar, 2),
             "plastic_yield_from_input_pct": round(plastic_yield_from_total_input, 4),
         },

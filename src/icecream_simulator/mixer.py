@@ -16,6 +16,8 @@ Outputs: ProductBatch (to freezer), TankResidue (for cleaning).
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+
 from pydantic import BaseModel, Field
 
 from icecream_simulator.schemas import RawMaterials
@@ -24,6 +26,31 @@ from icecream_simulator.batch_models import (
     TankResidue,
     Composition,
 )
+
+
+# ---------------------------------------------------------------------------
+# Pluggable mixer model (extensibility)
+# ---------------------------------------------------------------------------
+
+
+class MixerModelBase(ABC):
+    """
+    Abstract base for mixer stage in the MaterialBatch pipeline.
+    Provide your own implementation for custom rheology, power, or residue models.
+    """
+
+    @property
+    def model_name(self) -> str:
+        return self.__class__.__name__
+
+    @abstractmethod
+    def run(self, inputs: MixerInput) -> tuple[ProductBatch, TankResidue, float]:
+        """
+        Run the mixer stage.
+        Returns:
+            (product_batch, tank_residue, power_W)
+        """
+        ...
 
 
 class MixerGeometry(BaseModel):
@@ -185,3 +212,10 @@ def run_mixer(inputs: MixerInput) -> tuple[ProductBatch, TankResidue, float]:
         viscosity_Pa_s=mu,
     )
     return product_batch, tank_residue, power_W
+
+
+class DefaultMixerModel(MixerModelBase):
+    """Default mixer implementation using Power Law viscosity and P = K·μ·N²·D³."""
+
+    def run(self, inputs: MixerInput) -> tuple[ProductBatch, TankResidue, float]:
+        return run_mixer(inputs)

@@ -132,7 +132,21 @@ report = run_full_cycle(
 print_report(report)
 ```
 
-Custom viscosity, power, residue, wash, Darcy, or bioconversion models can be plugged in where marked with **PLUG-IN** in the source (e.g. `mixer.viscosity_power_law`, `mixer.residue_mass_kg`, `bioconversion.run_bioconversion`).
+**Extensibility:** You can plug in your own mixing or bioplastic conversion logic by implementing `MixerModelBase` or `BioconversionModelBase` and passing them to `run_full_cycle()`:
+
+```python
+from icecream_simulator import run_full_cycle, MixerModelBase, DefaultBioconversionModel
+
+class MyMixerModel(MixerModelBase):
+    def run(self, inputs): ...  # return (ProductBatch, TankResidue, power_W)
+
+report = run_full_cycle(
+    mixing_model=MyMixerModel(),
+    bioconversion_model=DefaultBioconversionModel(yield_coefficient=0.35),
+)
+```
+
+Custom viscosity, power, residue, wash, Darcy, or bioconversion can also be changed where marked **PLUG-IN** in the source (e.g. `mixer.viscosity_power_law`, `bioconversion.run_bioconversion`).
 
 ## Project Structure
 
@@ -162,6 +176,11 @@ python examples/sample_run_verbose.py   # Detailed data flow trace
 ```
 
 ## Monitoring Dashboard
+
+The dashboard can run **either** pipeline with stage-by-stage updates:
+
+- **Pipeline 1:** Mass balance (PIML mixing → ProductionEngine → WasteLogic → Bioplastic).
+- **Pipeline 2:** MaterialBatch (Mixer → CIP → Filtration → Bioplastic), with optional custom `mixing_model` / `bioconversion_model` (sidebar uses default models).
 
 ```bash
 pip install streamlit

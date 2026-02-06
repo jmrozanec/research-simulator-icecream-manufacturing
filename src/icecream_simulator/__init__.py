@@ -42,6 +42,8 @@ from icecream_simulator.batch_models import (
     ContaminantLoad,
 )
 from icecream_simulator.run_full_cycle import run_full_cycle, print_report
+from icecream_simulator.mixer import MixerModelBase, DefaultMixerModel
+from icecream_simulator.bioconversion import BioconversionModelBase, DefaultBioconversionModel
 
 __version__ = "0.2.0"
 
@@ -77,4 +79,8 @@ __all__ = [
     "ContaminantLoad",
     "run_full_cycle",
     "print_report",
+    "MixerModelBase",
+    "DefaultMixerModel",
+    "BioconversionModelBase",
+    "DefaultBioconversionModel",
 ]
