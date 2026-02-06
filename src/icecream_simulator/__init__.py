@@ -29,6 +29,19 @@ from icecream_simulator.models import (
 )
 from icecream_simulator.production import ProductionEngine, WasteLogic
 from icecream_simulator.runner import SimulationRunner
+from icecream_simulator.batch_models import (
+    MaterialBatch,
+    ProductBatch,
+    TankResidue,
+    WastewaterStream,
+    RetentateStream,
+    PermeateStream,
+    FilterState,
+    BioplasticOutput,
+    Composition,
+    ContaminantLoad,
+)
+from icecream_simulator.run_full_cycle import run_full_cycle, print_report
 
 __version__ = "0.2.0"
 
@@ -51,4 +64,17 @@ __all__ = [
     "ProductionEngine",
     "WasteLogic",
     "SimulationRunner",
+    # MaterialBatch pipeline (full cycle: Mixing → CIP → Filtration → Bioconversion)
+    "MaterialBatch",
+    "ProductBatch",
+    "TankResidue",
+    "WastewaterStream",
+    "RetentateStream",
+    "PermeateStream",
+    "FilterState",
+    "BioplasticOutput",
+    "Composition",
+    "ContaminantLoad",
+    "run_full_cycle",
+    "print_report",
 ]

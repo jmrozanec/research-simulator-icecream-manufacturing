@@ -101,6 +101,39 @@ waste = WasteLogic().generate_wastewater(
 # waste.bod_mg_L, waste.fog_mg_L, waste.organic_content_kg
 ```
 
+## MaterialBatch Pipeline (Full Cycle)
+
+A second architecture centers on a **MaterialBatch** object that flows through every stage. Use it for rheology, residue, CIP, filtration (Darcy/fouling), and sugar-to-plastic conversion in one run.
+
+- **batch_models.py** — `MaterialBatch` (mass, T, μ, composition, COD/BOD), `WastewaterStream`, `RetentateStream`, `FilterState`, etc.
+- **mixer.py** — Power Law viscosity, power \(P = K \cdot \mu \cdot N^2 \cdot D^3\), residue = f(μ, surface area) → `ProductBatch` + `TankResidue`
+- **cip.py** — CIP wash efficiency → `WastewaterStream` (TSS, dissolved sugars)
+- **filtration.py** — Darcy resistance, filter saturation; permeate + retentate; maintenance flag when saturation > 90%
+- **bioconversion.py** — \(Mass_{PHA} = Mass_{Sugar} \times Yield_{Coefficient}\) (e.g. Ralstonia eutropha logic)
+- **run_full_cycle.py** — One full cycle and efficiency/plastic yield report
+
+Run the full cycle:
+
+```bash
+python -m icecream_simulator.run_full_cycle
+# or
+uv run python examples/run_material_batch_cycle.py
+```
+
+```python
+from icecream_simulator import RawMaterials, run_full_cycle, print_report
+
+report = run_full_cycle(
+    raw_materials=RawMaterials(milk=100, cream=30, sugar=25, stabilizers=2, water=43),
+    tank_surface_area_m2=10.0,
+    water_volume_L=80.0,
+    bioplastic_yield_coefficient=0.4,
+)
+print_report(report)
+```
+
+Custom viscosity, power, residue, wash, Darcy, or bioconversion models can be plugged in where marked with **PLUG-IN** in the source (e.g. `mixer.viscosity_power_law`, `mixer.residue_mass_kg`, `bioconversion.run_bioconversion`).
+
 ## Project Structure
 
 ```
@@ -109,6 +142,12 @@ src/icecream_simulator/
 ├── schemas.py          # RawMaterials, IceCreamRecipe, Wastewater, ShrinkageResult, State
 ├── production.py       # ProductionEngine, WasteLogic
 ├── runner.py           # SimulationRunner
+├── batch_models.py     # MaterialBatch, WastewaterStream, RetentateStream, FilterState, etc.
+├── mixer.py            # Rheology, power P=K·μ·N²·D³, residue → ProductBatch + TankResidue
+├── cip.py              # CIP → WastewaterStream
+├── filtration.py       # Darcy/fouling, permeate + retentate, filter health
+├── bioconversion.py    # Sugar → PHA (yield coefficient)
+├── run_full_cycle.py   # Full cycle + report
 └── models/
     ├── base.py         # MixingModelBase, BioplasticConversionModelBase
     └── placeholders.py # PlaceholderMixingModel, PlaceholderBioplasticModel
