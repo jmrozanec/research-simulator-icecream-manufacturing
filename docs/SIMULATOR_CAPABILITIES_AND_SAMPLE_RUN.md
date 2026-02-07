@@ -1,7 +1,6 @@
 # Ice Cream Manufacturing & Wastewater Valorization Simulator
 
-**Capabilities overview and sample run**  
-*For research groups developing physical and chemical sub-models*
+**Capabilities overview and sample run** 
 
 ---
 
