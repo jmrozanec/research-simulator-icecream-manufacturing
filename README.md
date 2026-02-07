@@ -102,10 +102,21 @@ src/icecream_simulator/
     └── __init__.py
 ```
 
+## Run the simulator
+
+From the project root (default parameters, report to stdout):
+
+```bash
+python run.py
+# or
+uv run python run.py
+# or
+python -m icecream_simulator.run_full_cycle
+```
+
 ## Running examples
 
 ```bash
-python -m icecream_simulator.run_full_cycle
 python examples/basic_usage.py
 python examples/custom_piml_mixing.py   # Custom MixerModelBase
 python examples/sample_run_verbose.py  # Verbose data flow

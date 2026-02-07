@@ -9,6 +9,8 @@ Outputs: Permeate (clean water), Retentate (concentrated sugar/sludge).
 
 from __future__ import annotations
 
+from typing import Optional
+
 from icecream_simulator.batch_models import (
     WastewaterStream,
     PermeateStream,
@@ -61,7 +63,7 @@ def saturation_fraction(mass_accumulated_kg: float, max_mass_kg: float) -> float
 def run_filtration(
     wastewater: WastewaterStream,
     config: FiltrationConfig,
-    initial_filter_state: FilterState | None = None,
+    initial_filter_state: Optional[FilterState] = None,
 ) -> tuple[PermeateStream, RetentateStream, FilterState]:
     """
     Split wastewater into permeate and retentate; update filter state.

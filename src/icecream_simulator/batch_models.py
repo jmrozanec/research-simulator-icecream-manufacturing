@@ -8,7 +8,7 @@ All stages consume or produce batches/streams derived from these types.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -59,7 +59,7 @@ class MaterialBatch(BaseModel):
     temperature_K: float = Field(ge=0, description="Temperature (K)")
     viscosity_Pa_s: float = Field(ge=0, description="Dynamic viscosity μ (Pa·s)")
     composition: Composition = Field(default_factory=Composition)
-    contaminant_load: ContaminantLoad | None = Field(
+    contaminant_load: Optional[ContaminantLoad] = Field(
         default=None,
         description="COD/BOD load (None if not applicable, e.g. fresh mix)",
     )

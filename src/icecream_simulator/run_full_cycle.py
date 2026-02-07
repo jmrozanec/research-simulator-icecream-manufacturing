@@ -9,6 +9,7 @@ pluggable mixing_model / bioconversion_model for extensibility.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Optional
 
 from icecream_simulator.schemas import RawMaterials, MassBalanceState, StageResult
 from icecream_simulator.mixer import MixerInput, MixerModelBase, DefaultMixerModel, run_mixer
@@ -35,13 +36,13 @@ def _thermal_properties_from_composition(water_fraction: float) -> tuple[float, 
 
 
 def run_full_cycle(
-    raw_materials: RawMaterials | None = None,
+    raw_materials: Optional[RawMaterials] = None,
     tank_surface_area_m2: float = 10.0,
     water_volume_L: float = 80.0,
     bioplastic_yield_coefficient: float = 0.4,
-    mixing_model: MixerModelBase | None = None,
-    bioconversion_model: BioconversionModelBase | None = None,
-    on_stage_complete: Callable[[str, StageResult, dict], None] | None = None,
+    mixing_model: Optional[MixerModelBase] = None,
+    bioconversion_model: Optional[BioconversionModelBase] = None,
+    on_stage_complete: Optional[Callable[[str, StageResult, dict], None]] = None,
     air_overrun: float = 0.5,
     interface_flush_L: float = 5.0,
     include_cleaning_phase: bool = True,
