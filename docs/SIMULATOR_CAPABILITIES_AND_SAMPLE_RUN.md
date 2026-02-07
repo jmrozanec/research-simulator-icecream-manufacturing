@@ -160,7 +160,7 @@ Below is one **full run** with fixed inputs. All numbers are from the current de
 ## 4. How to run and extend
 
 - **Run one full cycle (default parameters):**  
-  `python -m icecream_simulator.run_full_cycle`
+  `python run.py` (from project root) or `python -m icecream_simulator.run_full_cycle`
 - **Run with your parameters:**  
   Use `run_full_cycle(raw_materials=..., tank_surface_area_m2=..., water_volume_L=..., air_overrun=..., interface_flush_L=..., include_cleaning_phase=..., temperature_K=..., mixing_time_s=..., rpm=..., mixing_model=..., bioconversion_model=...)`.
 - **Replace only mixing or bioconversion:**  
