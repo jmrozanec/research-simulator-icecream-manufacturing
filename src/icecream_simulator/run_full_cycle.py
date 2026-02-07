@@ -25,7 +25,7 @@ from icecream_simulator.batch_models import (
     MaterialBatchCycleReport,
 )
 
-# Mix density (kg/L) for volume and interface flush (parity with ProductionEngine)
+# Mix density (kg/L) for volume and interface flush
 MIX_DENSITY_KG_L = 1.05
 
 

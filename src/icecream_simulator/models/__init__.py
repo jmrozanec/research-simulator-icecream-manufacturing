@@ -1,21 +1,8 @@
-"""Pluggable model interfaces and implementations."""
+"""
+Pluggable model interfaces for the simulator.
 
-from icecream_simulator.models.base import (
-    MixingModelBase,
-    FiltrationModelBase,
-    BioplasticConversionModelBase,
-)
-from icecream_simulator.models.placeholders import (
-    PlaceholderMixingModel,
-    PlaceholderFiltrationModel,
-    PlaceholderBioplasticModel,
-)
+Mixer and bioconversion interfaces live in mixer.py and bioconversion.py.
+This package is kept for potential future shared abstractions.
+"""
 
-__all__ = [
-    "MixingModelBase",
-    "FiltrationModelBase",
-    "BioplasticConversionModelBase",
-    "PlaceholderMixingModel",
-    "PlaceholderFiltrationModel",
-    "PlaceholderBioplasticModel",
-]
+__all__: list[str] = []

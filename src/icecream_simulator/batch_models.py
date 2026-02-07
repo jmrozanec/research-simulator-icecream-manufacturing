@@ -183,13 +183,13 @@ class BioplasticOutput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Typed report for full cycle (parity with SimulationReport)
+# Typed report for full cycle
 # ---------------------------------------------------------------------------
 
 class MaterialBatchCycleReport(BaseModel):
     """
     Typed report for one MaterialBatch cycle.
-    Includes mass_balance_closed for parity with Pipeline 1 SimulationReport.
+    Includes mass_balance_closed for validation.
     """
 
     raw_materials_kg: float = 0.0

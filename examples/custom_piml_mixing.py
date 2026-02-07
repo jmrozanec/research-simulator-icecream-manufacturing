@@ -1,145 +1,102 @@
 """
-Example: Plugging in a Custom PIML Mixing Model
+Example: Plugging in a Custom Mixing Model
 
-This example demonstrates how to implement and use a custom Physics-Informed
-Machine Learning (PIML) mixing model in place of the default placeholder.
+Demonstrates how to implement and use a custom mixing model (e.g. PIML,
+Carreau-Yasuda rheology) in place of the default Power Law mixer.
 
-In production, you would replace the simple formulas below with:
-- A trained neural network (e.g., PyTorch, TensorFlow)
-- A surrogate model from CFD simulations
-- A PINN (Physics-Informed Neural Network) for viscosity prediction
-- An external service/API call to a deployed model
+In production, you would replace the formulas below with:
+- A trained neural network (e.g. PyTorch, TensorFlow)
+- A surrogate from CFD simulations
+- A PINN for viscosity prediction
 """
 
 import json
 from pathlib import Path
 
-# Add src to path for standalone execution
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from icecream_simulator.schemas import RawMaterials, MixingInput, MixingOutput
-from icecream_simulator.models import (
-    MixingModelBase,
-    PlaceholderBioplasticModel,
-    PlaceholderMixingModel,
-)
-from icecream_simulator.runner import SimulationRunner
+from icecream_simulator import RawMaterials, run_full_cycle, DefaultBioconversionModel
+from icecream_simulator.mixer import MixerModelBase, MixerInput
+from icecream_simulator.batch_models import ProductBatch, TankResidue, Composition
 
 
 # ---------------------------------------------------------------------------
-# Custom PIML Mixing Model (Example Implementation)
+# Custom Mixing Model (example: Carreau-Yasuda–style rheology)
 # ---------------------------------------------------------------------------
 
 
-class CustomPIMLMixingModel(MixingModelBase):
+class CustomMixingModel(MixerModelBase):
     """
-    Example custom PIML mixing model.
-
-    This model uses a Carreau-Yasuda-like shear-thinning equation combined
-    with ingredient-based corrections. In a real deployment, you would:
-    - Load a trained model (e.g., model.load_state_dict(...))
-    - Call model.forward(...) instead of these empirical formulas
-    - Optionally incorporate PDE residuals for physics consistency
+    Example custom mixer: Carreau-Yasuda–style shear-thinning with
+    ingredient-based zero-shear viscosity. Returns (ProductBatch, TankResidue, power_W).
     """
 
     def __init__(self, n_infty: float = 0.001, lambda_carreau: float = 1.0):
-        """
-        Args:
-            n_infty: Infinite-shear viscosity (Pa·s).
-            lambda_carreau: Characteristic time constant (s).
-        """
         self.n_infty = n_infty
         self.lambda_carreau = lambda_carreau
 
-    @property
-    def model_name(self) -> str:
-        return "CustomPIMLMixingModel"
-
-    def predict(self, input_data: MixingInput) -> MixingOutput:
-        rm = input_data.raw_materials
+    def run(self, inputs: MixerInput) -> tuple[ProductBatch, TankResidue, float]:
+        rm = inputs.raw_materials
         total_mass = rm.total_mass
-        shear_rate = input_data.shear_rate
-
-        # Zero-shear viscosity: ingredient-based (placeholder for PIML prediction)
-        # In production: zero_shear = self.neural_net(ingredient_ratios, T)
-        sugar_ratio = rm.sugar / max(total_mass, 1e-9)
-        stabilizer_ratio = rm.stabilizers / max(total_mass, 1e-9)
-        n_0 = 0.5 + 2.0 * sugar_ratio + 1.5 * stabilizer_ratio  # Pa·s
-
-        # Carreau-Yasuda shear-thinning (physics-informed structure)
-        # η(γ̇) = η_∞ + (η_0 - η_∞) * [1 + (λγ̇)^a]^((n-1)/a)
-        a = 2.0  # Yasuda exponent
-        n = 0.4  # Power-law index
-        reduced_shear = (self.lambda_carreau * shear_rate) ** a
-        viscosity = self.n_infty + (n_0 - self.n_infty) * (
-            (1 + reduced_shear) ** ((n - 1) / a)
+        if total_mass <= 0:
+            comp = Composition(fat=0, sugar=0, water=0, solids=0)
+            return (
+                ProductBatch(mass_kg=0, temperature_K=inputs.initial_temperature_K, viscosity_Pa_s=0, composition=comp),
+                TankResidue(mass_kg=0, composition=comp, viscosity_Pa_s=0),
+                0.0,
+            )
+        # Composition from raw materials
+        comp = Composition(
+            fat=(rm.milk * 0.04 + rm.cream * 0.36) / total_mass,
+            sugar=rm.sugar / total_mass,
+            water=rm.water / total_mass,
+            solids=(rm.milk * 0.09 + rm.stabilizers) / total_mass,
         )
+        T = inputs.initial_temperature_K
+        N_rps = inputs.rpm / 60.0
+        shear_rate = N_rps * inputs.impeller_diameter_m * 10.0  # 1/s
 
-        # Thermal properties: mixture rules (placeholder for PIML)
-        water_frac = rm.water / max(total_mass, 1e-9)
-        fat_frac = (rm.milk * 0.04 + rm.cream * 0.36) / max(total_mass, 1e-9)
-        thermal_conductivity = 0.6 * water_frac + 0.2 * fat_frac + 0.3  # W/(m·K)
-        specific_heat = 4000 * water_frac + 2000 * fat_frac + 2500  # J/(kg·K)
+        # Zero-shear viscosity (ingredient-based; replace with PIML)
+        n_0 = 0.5 + 2.0 * comp.sugar + 1.5 * comp.solids
+        # Carreau-Yasuda: η = η_∞ + (η_0 - η_∞) * [1 + (λγ̇)^a]^((n-1)/a)
+        a, n = 2.0, 0.4
+        reduced = (self.lambda_carreau * max(shear_rate, 1e-6)) ** a
+        mu = self.n_infty + (n_0 - self.n_infty) * ((1 + reduced) ** ((n - 1) / a))
 
-        # Mixing energy (work input)
-        energy_consumed = viscosity * shear_rate * input_data.mixing_time * total_mass
+        # Power draw P = K μ N² D³
+        K, D = 2.0, inputs.impeller_diameter_m
+        power_W = K * mu * (N_rps**2) * (D**3)
 
-        return MixingOutput(
-            viscosity=viscosity,
-            thermal_conductivity=thermal_conductivity,
-            specific_heat=specific_heat,
-            product_mass=total_mass,
-            energy_consumed=energy_consumed,
+        # Residue: f(μ, area)
+        residue_kg = 0.05 * (mu**0.5) * (inputs.tank_surface_area_m2 / 10.0) * inputs.tank_surface_area_m2
+        residue_kg = min(residue_kg, total_mass * 0.15)
+        product_kg = total_mass - residue_kg
+
+        product_batch = ProductBatch(
+            mass_kg=product_kg, temperature_K=T, viscosity_Pa_s=mu, composition=comp,
         )
-
-
-# ---------------------------------------------------------------------------
-# Usage: Run simulation with custom PIML model
-# ---------------------------------------------------------------------------
+        tank_residue = TankResidue(mass_kg=residue_kg, composition=comp, viscosity_Pa_s=mu)
+        return product_batch, tank_residue, power_W
 
 
 def main() -> None:
-    # 1. Instantiate models (plug in custom PIML for mixing)
-    mixing_model = CustomPIMLMixingModel(n_infty=0.001, lambda_carreau=2.0)
-    # Or use placeholder: mixing_model = PlaceholderMixingModel()
-    filtration_model = PlaceholderFiltrationModel(product_recovery=0.88)
-    bioplastic_model = PlaceholderBioplasticModel(conversion_yield=0.45)
-
-    # 2. Create runner with pluggable models
-    runner = SimulationRunner(
-        mixing_model=mixing_model,
-        filtration_model=filtration_model,
-        bioplastic_model=bioplastic_model,
-    )
-
-    # 3. Define raw materials
     raw_materials = RawMaterials(
-        milk=50.0,
-        cream=20.0,
-        sugar=15.0,
-        stabilizers=1.0,
-        water=14.0,
+        milk=50.0, cream=20.0, sugar=15.0, stabilizers=1.0, water=14.0,
     )
+    mixing_model = CustomMixingModel(n_infty=0.001, lambda_carreau=2.0)
+    bioplastic_model = DefaultBioconversionModel(yield_coefficient=0.45)
 
-    # 4. Run simulation
-    report = runner.run(
+    report = run_full_cycle(
         raw_materials=raw_materials,
-        shear_rate=150.0,
-        temperature=278.15,  # 5 °C
-        mixing_time=360.0,
+        mixing_model=mixing_model,
+        bioconversion_model=bioplastic_model,
         interface_flush_L=5.0,
-        cleaning_water_inflow_L=60.0,
-        pathway="PHA",
+        water_volume_L=60.0,
     )
 
-    # 5. Output JSON-ready report
-    report_dict = report.model_dump()
-    print(json.dumps(report_dict, indent=2, default=str))
-
-    # Optional: save to file
-    # with open("simulation_report.json", "w") as f:
-    #     json.dump(report_dict, f, indent=2, default=str)
+    out = {k: v for k, v in report.items() if k != "typed_report"}
+    print(json.dumps(out, indent=2, default=str))
 
 
 if __name__ == "__main__":

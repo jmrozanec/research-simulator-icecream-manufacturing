@@ -1,6 +1,6 @@
 # Ice Cream Manufacturing & Wastewater Valorization Simulator
 
-**Capabilities overview and sample run (Pipeline 2: MaterialBatch)**  
+**Capabilities overview and sample run**  
 *For research groups developing physical and chemical sub-models*
 
 ---
@@ -38,7 +38,7 @@ Additional features (aligned with industrial practice):
 
 ## 3. Sample parameters and process outcome by stage
 
-Below is one **full run** of the second pipeline with fixed inputs. All numbers are from the current default models and are for illustration only; replacing sub-models will change the outputs.
+Below is one **full run** with fixed inputs. All numbers are from the current default models and are for illustration only; replacing sub-models will change the outputs.
 
 ### 3.1 Global inputs (sample)
 
@@ -168,4 +168,4 @@ Below is one **full run** of the second pipeline with fixed inputs. All numbers 
 - **Replace internal correlations:**  
   Search the codebase for **PLUG-IN** comments (e.g. viscosity, power, residue, wash efficiency, Darcy, yield) and substitute your own equations or surrogates.
 
-This document and the sample numbers refer to **Pipeline 2 (MaterialBatch)**. For a short technical overview of both pipelines and the project structure, see the main [README](../README.md).
+For a short technical overview and project structure, see the main [README](../README.md).

@@ -1,9 +1,8 @@
 """
 Sample Run: Verbose data flow demonstration.
 
-Run this script to see exactly how data flows through each stage of the
-ice cream production and waste-to-plastic pipeline. Useful for understanding
-the simulator's behavior.
+Shows how data flows through each stage: Mixer → CIP → Filtration → Bioplastic.
+Useful for understanding the simulator's behavior.
 """
 
 import sys
@@ -11,12 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from icecream_simulator import (
-    RawMaterials,
-    SimulationRunner,
-    PlaceholderMixingModel,
-    PlaceholderBioplasticModel,
-)
+from icecream_simulator import RawMaterials, run_full_cycle
 
 
 def main() -> None:
@@ -24,9 +18,6 @@ def main() -> None:
     print("ICE CREAM PRODUCTION & WASTE-TO-PLASTIC SIMULATION — DATA FLOW")
     print("=" * 70)
 
-    # -----------------------------------------------------------------------
-    # INPUT STAGE
-    # -----------------------------------------------------------------------
     raw_materials = RawMaterials(
         milk=100.0,
         cream=30.0,
@@ -41,22 +32,14 @@ def main() -> None:
     print(f"│  TOTAL MASS: {raw_materials.total_mass:.1f} kg")
     print("└────────────────────────────────────────────────────────────────┘")
 
-    runner = SimulationRunner(
-        mixing_model=PlaceholderMixingModel(),
-        bioplastic_model=PlaceholderBioplasticModel(conversion_yield=0.40),
-    )
-
-    # -----------------------------------------------------------------------
-    # RUN WITH CALLBACK TO TRACE DATA FLOW
-    # -----------------------------------------------------------------------
+    stage_display = {
+        "mixer": ("MIXER", "Rheology, power, residue → Product + TankResidue"),
+        "cip": ("CIP", "Residue + water → Wastewater (TSS, BOD, FOG)"),
+        "filtration": ("FILTRATION", "Wastewater → Permeate + Retentate (sugar concentrate)"),
+        "bioconversion": ("BIOCONVERSION", "Retentate sugar → PHA"),
+    }
 
     def on_stage(stage_name: str, result, cumulative: dict) -> None:
-        stage_display = {
-            "mixing": ("MIXING (PIML)", "Raw materials → Viscosity, thermal properties"),
-            "production": ("PRODUCTION", "Mass balance: Output = Input - Shrinkage"),
-            "wastewater": ("WASTEWATER", "Cleaning water + product loss → BOD, FOG"),
-            "bioplastic_conversion": ("BIOPLASTIC CONVERSION", "Wastewater organics → PHA"),
-        }
         title, desc = stage_display.get(stage_name, (stage_name, ""))
         print(f"\n┌─ STAGE: {title}")
         print(f"│  {desc}")
@@ -76,33 +59,27 @@ def main() -> None:
                     print(f"│    {k}: {v}")
         print("└────────────────────────────────────────────────────────────────")
 
-    report = runner.run(
+    report = run_full_cycle(
         raw_materials=raw_materials,
-        shear_rate=120.0,
-        temperature=278.15,
-        mixing_time=300.0,
         on_stage_complete=on_stage,
         interface_flush_L=5.0,
-        cleaning_water_inflow_L=80.0,
+        water_volume_L=80.0,
     )
 
-    # -----------------------------------------------------------------------
-    # FINAL REPORT
-    # -----------------------------------------------------------------------
     print("\n┌─ FINAL REPORT ──────────────────────────────────────────────────┐")
-    print(f"│  Ice cream product:    {report.total_product_mass:>8.2f} kg")
-    print(f"│  Wastewater stream:    {report.total_wastewater_mass:>8.2f} kg")
-    print(f"│  Bioplastic (PHA):     {report.total_bioplastic_mass:>8.2f} kg")
-    print(f"│  Total energy:         {report.total_energy_consumed:>8.2e} J")
-    print(f"│  Mass balance closed:  {report.mass_balance_closed}")
+    print(f"│  Product to freezer:   {report['mixer']['product_to_freezer_kg']:>8.2f} kg")
+    print(f"│  Ice cream volume:     {report['mixer']['ice_cream_volume_L']:>8.2f} L")
+    print(f"│  Wastewater:           {report['cip']['wastewater_mass_kg']:>8.2f} kg")
+    print(f"│  Bioplastic (PHA):     {report['bioconversion']['bioplastic_mass_kg']:>8.2f} kg")
+    print(f"│  Mass balance closed: {report['efficiency_summary']['mass_balance_closed']}")
     print("└────────────────────────────────────────────────────────────────┘")
 
-    print("\n► Mass flow summary (closed-loop + operational loss):")
+    print("\n► Mass flow summary:")
     print(f"  Raw materials ({raw_materials.total_mass:.1f} kg)")
-    shrinkage = report.metadata.get("shrinkage_kg", 0)
-    print(f"    → Production → {report.total_product_mass:.1f} kg ice cream (shrinkage: {shrinkage:.2f} kg)")
-    print(f"    → Wastewater = cleaning water + shrinkage → BOD/FOG")
-    print(f"    → Bioplastic → {report.total_bioplastic_mass:.2f} kg PHA from organics")
+    print(f"    → Mixer → {report['mixer']['product_to_freezer_kg']:.1f} kg to freezer + {report['mixer']['tank_residue_kg']:.2f} kg residue + {report['mixer']['interface_flush_kg']:.2f} kg interface flush")
+    print(f"    → CIP → wastewater {report['cip']['wastewater_mass_kg']:.1f} kg (TSS, BOD, FOG)")
+    print(f"    → Filtration → permeate + retentate ({report['filtration']['retentate_sugar_kg']:.2f} kg sugar)")
+    print(f"    → Bioconversion → {report['bioconversion']['bioplastic_mass_kg']:.2f} kg PHA")
     print()
 
 
