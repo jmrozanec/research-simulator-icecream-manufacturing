@@ -8,11 +8,11 @@
 
 The simulator models an **integrated ice cream production and wastewater valorization** chain in a single digital twin:
 
-- **Upstream:** Raw ingredients → mixing (rheology, power, residue) → product to freezer and operational losses.
-- **Midstream:** Clean-in-place (CIP) turns tank residue and interface flush into a wastewater stream (TSS, BOD, FOG, dissolved sugars).
+- **Upstream (industrial chain only):** Raw ingredients → **7-step industrial chain**: preparation mix (blending only; no air) → pasteurization → homogenization → cooling PHE → ageing vat → freezer (aeration/overrun here) → hardening. Residues from prep + ageing + interface flush go to CIP. **Mixing** is only in the preparation stage; **aeration** is only in the freezer.
+- **Midstream:** Clean-in-place (CIP) turns combined residue and interface flush into a wastewater stream (TSS, BOD, FOG, dissolved sugars).
 - **Downstream:** Membrane filtration splits wastewater into permeate (clean water) and retentate (concentrated sugar/solids); retentate feeds a sugar-to-bioplastic conversion (e.g. PHA).
 
-The **MaterialBatch** object (mass, temperature, viscosity, composition: fat/sugar/water/solids, and later COD/BOD) is the central data structure and passes through every stage. The code is modular and **extensible**: default correlations can be replaced by your own **physics-based or data-driven models** at clearly marked plug-in points, without changing the overall flow or duplicating phases.
+The **MaterialBatch** object (mass, temperature, viscosity, composition: fat/sugar/water/solids) is the central data structure and passes through every stage. The code is modular and **extensible**: default correlations can be replaced by your own **physics-based or data-driven models** at clearly marked plug-in points, without changing the overall flow or duplicating phases.
 
 ---
 
@@ -54,20 +54,24 @@ Below is one **full run** with fixed inputs. All numbers are from the current de
 | Air overrun | 0.5 | — |
 | Interface flush | 5.0 | L |
 | Include cleaning phase | Yes | — |
-| Mixing temperature | 278 | K |
-| Mixing time | 300 | s |
-| Mixer RPM | 60 | rpm |
+| Use industrial flow | Yes | — |
+| Homogenization pressure | 200 | bar |
+| Ageing stirrer on | Yes | — |
+| Jacket flow (ageing) | 20 | L/min |
+| Mixing temperature (mixer mode) | 278 | K |
+| Mixing time (mixer mode) | 300 | s |
+| Mixer RPM (mixer mode) | 60 | rpm |
 | Bioplastic yield coefficient | 0.4 | g PHA / g sugar |
 
 ---
 
-### 3.2 Stage 1 — Mixer (rheology & residue)
+### 3.2 Stage 1 — Upstream (industrial chain or mixer)
 
-**Role:** Mix raw ingredients; compute apparent viscosity and power draw; split output into product (to freezer) and tank residue (for CIP). Interface flush is applied here as additional loss (same loss path as residue).
+**Default (industrial):** Seven steps — preparation mix (hot high-shear), pasteurization (PHE ~80°C), homogenization (e.g. 200 bar), two-stage cooling (80→30→5°C), ageing vat (jacketed, stirrer), freezer (overrun), hardening. Combined residue (prep + ageing + interface flush) goes to CIP. **Legacy (single mixer):** One mixing stage with rheology, power, residue; interface flush applied as additional loss.
 
-**Inputs (conceptual):** Raw materials, tank surface area, RPM, mixing time, initial temperature.
+**Inputs (conceptual):** Raw materials, tank surface area; for industrial: homogenization pressure, stirrer, jacket flow; for mixer: RPM, mixing time, temperature.
 
-**Outputs (sample):**
+**Outputs (sample, industrial default):**
 
 | Quantity | Value | Unit |
 |----------|--------|------|

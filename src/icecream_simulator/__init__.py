@@ -4,7 +4,7 @@ Ice Cream Production and Waste-to-Plastic Conversion Simulator.
 A modular simulation framework for integrated ice cream manufacturing
 and bioplastic conversion from wastewater streams.
 
-Single pipeline: Mixing → CIP → Filtration → Bioconversion (MaterialBatch flow).
+Single pipeline: Industrial chain (preparation → pasteurization → homogenization → cooling → ageing → freezer → hardening) → CIP → Filtration → Bioconversion (MaterialBatch flow).
 """
 
 from icecream_simulator.schemas import RawMaterials, MassBalanceState, StageResult

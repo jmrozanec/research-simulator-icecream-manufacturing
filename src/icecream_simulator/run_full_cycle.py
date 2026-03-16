@@ -1,9 +1,9 @@
 """
 Main execution: one full cycle
-  Mixing → Washing (CIP) → Filtering → Plastic Conversion
-with a report on efficiency and plastic yield.
-Supports optional on_stage_complete callback for dashboards and
-pluggable mixing_model / bioconversion_model for extensibility.
+  Industrial chain (preparation → pasteurization → homogenization → cooling →
+  ageing → freezer → hardening) → CIP → Filtration → Bioplastic.
+Mixing (blending) is only in the preparation stage; aeration (overrun) is in the freezer.
+Supports optional on_stage_complete callback and pluggable bioconversion_model.
 """
 
 from __future__ import annotations
@@ -12,11 +12,9 @@ from collections.abc import Callable
 from typing import Optional
 
 from icecream_simulator.schemas import RawMaterials, MassBalanceState, StageResult
-from icecream_simulator.mixer import MixerInput, MixerModelBase, DefaultMixerModel, run_mixer
 from icecream_simulator.cip import CIPInput, run_cip
 from icecream_simulator.filtration import FiltrationConfig, run_filtration
 from icecream_simulator.bioconversion import (
-    run_bioconversion,
     BioconversionModelBase,
     DefaultBioconversionModel,
 )
@@ -25,6 +23,7 @@ from icecream_simulator.batch_models import (
     WastewaterStream,
     MaterialBatchCycleReport,
 )
+from icecream_simulator.industrial_chain import run_industrial_chain
 
 # Mix density (kg/L) for volume and interface flush
 MIX_DENSITY_KG_L = 1.05
@@ -40,85 +39,75 @@ def run_full_cycle(
     tank_surface_area_m2: float = 10.0,
     water_volume_L: float = 80.0,
     bioplastic_yield_coefficient: float = 0.4,
-    mixing_model: Optional[MixerModelBase] = None,
     bioconversion_model: Optional[BioconversionModelBase] = None,
     on_stage_complete: Optional[Callable[[str, StageResult, dict], None]] = None,
     air_overrun: float = 0.5,
     interface_flush_L: float = 5.0,
     include_cleaning_phase: bool = True,
-    temperature_K: float = 278.0,
-    mixing_time_s: float = 300.0,
-    rpm: float = 60.0,
+    homogenization_pressure_bar: float = 200.0,
+    stirrer_on: bool = True,
+    jacket_flow_L_min: float = 20.0,
+    preparation_rpm: float = 60.0,
+    preparation_mixing_time_s: float = 300.0,
 ) -> dict:
     """
-    Run one full cycle: Mixing → [CIP → Filtration → Bioconversion when include_cleaning_phase].
-    Single ice cream process: no duplicate phases. Interface flush is applied as additional
-    loss from mixer output (same as P1); residue + interface flush go to CIP together.
+    Run one full cycle: Industrial chain (preparation → pasteurization →
+    homogenization → cooling → ageing → freezer → hardening) → CIP → Filtration →
+    Bioconversion when include_cleaning_phase. Mixing (blending) is only in
+    preparation; aeration (overrun) is applied in the freezer stage.
 
-    Returns a report dict with efficiency, plastic yield, and mass_balance_closed.
+    Returns a report dict with efficiency, plastic yield, mass_balance_closed,
+    and per-stage industrial_chain details.
 
     Args:
         raw_materials: Input recipe; default 200 kg batch if None.
-        tank_surface_area_m2: Tank surface for residue model.
-        water_volume_L: CIP water volume (used only when include_cleaning_phase=True).
+        tank_surface_area_m2: Tank surface for residue (preparation + ageing).
+        water_volume_L: CIP water volume (when include_cleaning_phase=True).
         bioplastic_yield_coefficient: Used only if bioconversion_model is None.
-        mixing_model: Pluggable mixer; uses DefaultMixerModel if None.
-        bioconversion_model: Pluggable bioconversion; uses DefaultBioconversionModel if None.
-        on_stage_complete: Optional callback (stage_name, StageResult, cumulative) for monitoring.
-        air_overrun: Volume overrun fraction (0.5 = 50%) for ice cream volume.
-        interface_flush_L: Start-of-run discard (L); subtracted from product, added to CIP feed.
-        include_cleaning_phase: If False, skip CIP/filtration/bioconversion (no wastewater path).
-        temperature_K: Initial mix temperature (K) for mixer.
-        mixing_time_s: Mixing duration (s).
-        rpm: Mixer RPM.
+        bioconversion_model: Pluggable bioconversion; DefaultBioconversionModel if None.
+        on_stage_complete: Optional callback (stage_name, StageResult, cumulative).
+        air_overrun: Volume overrun (0.5 = 50%); applied in freezer stage only.
+        interface_flush_L: Start-of-run discard (L); added to CIP feed.
+        include_cleaning_phase: If False, skip CIP/filtration/bioconversion.
+        homogenization_pressure_bar: Homogenizer pressure (e.g. 150–250 bar).
+        stirrer_on: Ageing vat stirrer on (reduces wall residue).
+        jacket_flow_L_min: Ageing vat cooling jacket flow (L/min).
+        preparation_rpm: Preparation mix agitator RPM.
+        preparation_mixing_time_s: Preparation mix duration (s).
     """
     raw = raw_materials or RawMaterials(
         milk=100.0, cream=30.0, sugar=25.0, stabilizers=2.0, water=43.0
     )
     total_input_kg = raw.total_mass
-    mixer_impl = mixing_model or DefaultMixerModel()
     bioconv_impl = bioconversion_model or DefaultBioconversionModel(
         yield_coefficient=bioplastic_yield_coefficient
     )
     cumulative: dict = {"product_kg": 0.0, "energy_consumed": 0.0}
 
-    # --- 1. Mixer (single phase: rheology + residue) ---
-    mixer_in = MixerInput(
-        raw_materials=raw,
+    # Industrial chain only: preparation (mixing) → pasteurization → homogenization →
+    # cooling → ageing → freezer (aeration) → hardening
+    final_product, _batch_after_ageing, cip_residue, ice_cream_volume_L, power_W, stage_results = run_industrial_chain(
+        raw,
         tank_surface_area_m2=tank_surface_area_m2,
-        rpm=rpm,
-        mixing_time_s=mixing_time_s,
-        initial_temperature_K=temperature_K,
+        homogenization_pressure_bar=homogenization_pressure_bar,
+        air_overrun=air_overrun,
+        interface_flush_L=interface_flush_L,
+        stirrer_on=stirrer_on,
+        jacket_flow_L_min=jacket_flow_L_min,
+        preparation_rpm=preparation_rpm,
+        preparation_mixing_time_s=preparation_mixing_time_s,
     )
-    product_batch, tank_residue, power_W = mixer_impl.run(mixer_in)
-    product_kg = product_batch.mass_kg
-    residue_kg = tank_residue.mass_kg
-
-    # Interface flush: additional operational loss (parity with P1). Not a separate phase:
-    # subtract from product, add to the mass that goes to CIP.
-    interface_flush_kg = min(interface_flush_L * MIX_DENSITY_KG_L, product_kg)
-    product_to_freezer_kg = product_kg - interface_flush_kg
-    # Combined residue for CIP = tank residue + interface flush (same composition as product)
-    cip_residue = TankResidue(
-        mass_kg=residue_kg + interface_flush_kg,
-        composition=product_batch.composition,
-        viscosity_Pa_s=product_batch.viscosity_Pa_s,
-    )
-
-    mixer_efficiency = (
-        (product_to_freezer_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
-    )
+    product_to_freezer_kg = final_product.mass_kg
+    residue_kg = cip_residue.metadata.get("prep_kg", 0) + cip_residue.metadata.get("ageing_kg", 0)
+    interface_flush_kg = cip_residue.metadata.get("interface_flush_kg", 0)
+    product_batch = final_product
+    mixer_efficiency = (product_to_freezer_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
     cumulative["product_kg"] = product_to_freezer_kg
     cumulative["energy_consumed"] = power_W
-
-    thermal_conductivity, specific_heat = _thermal_properties_from_composition(
-        product_batch.composition.water
-    )
-    ice_cream_volume_L = (product_to_freezer_kg / MIX_DENSITY_KG_L) * (1.0 + air_overrun)
-
+    thermal_conductivity, specific_heat = _thermal_properties_from_composition(product_batch.composition.water)
     if on_stage_complete:
         mb = MassBalanceState(
-            stage="mixer",
+            stage="industrial_chain",
             mass_in=total_input_kg,
             mass_out=product_to_freezer_kg + cip_residue.mass_kg,
             energy_consumed=power_W,
@@ -126,28 +115,27 @@ def run_full_cycle(
             mass_waste=cip_residue.mass_kg,
             metadata={
                 "viscosity": product_batch.viscosity_Pa_s,
-                "residue_kg": residue_kg,
-                "interface_flush_kg": interface_flush_kg,
-                "thermal_conductivity": thermal_conductivity,
-                "specific_heat": specific_heat,
+                "homogenization_pressure_bar": homogenization_pressure_bar,
+                "stirrer_on": stirrer_on,
+                "ice_cream_volume_L": ice_cream_volume_L,
+                "stage_results": stage_results,
             },
         )
         on_stage_complete(
-            "mixer",
+            "industrial_chain",
             StageResult(
-                stage_name="mixer",
+                stage_name="industrial_chain",
                 mass_balance=mb,
                 outputs={
                     "product_to_freezer_kg": product_to_freezer_kg,
+                    "ice_cream_volume_L": ice_cream_volume_L,
                     "tank_residue_kg": residue_kg,
                     "interface_flush_kg": interface_flush_kg,
-                    "viscosity_Pa_s": product_batch.viscosity_Pa_s,
-                    "mixing_power_W": power_W,
-                    "thermal_conductivity_W_mK": thermal_conductivity,
-                    "specific_heat_J_kgK": specific_heat,
-                    "ice_cream_volume_L": ice_cream_volume_L,
+                    "preparation_power_W": power_W,
+                    "stages": [s["stage"] for s in stage_results],
+                    "stage_results": stage_results,
                 },
-                model_used=mixer_impl.model_name,
+                model_used="IndustrialChain",
             ),
             dict(cumulative),
         )
@@ -282,9 +270,11 @@ def run_full_cycle(
             "air_overrun": air_overrun,
             "interface_flush_L": interface_flush_L,
             "include_cleaning_phase": include_cleaning_phase,
-            "temperature_K": temperature_K,
-            "mixing_time_s": mixing_time_s,
-            "rpm": rpm,
+            "homogenization_pressure_bar": homogenization_pressure_bar,
+            "stirrer_on": stirrer_on,
+            "jacket_flow_L_min": jacket_flow_L_min,
+            "preparation_rpm": preparation_rpm,
+            "preparation_mixing_time_s": preparation_mixing_time_s,
         },
         "mixer": {
             "product_to_freezer_kg": product_to_freezer_kg,
@@ -296,6 +286,13 @@ def run_full_cycle(
             "thermal_conductivity_W_mK": thermal_conductivity,
             "specific_heat_J_kgK": specific_heat,
             "mixer_efficiency_pct": round(mixer_efficiency, 2),
+        },
+        "industrial_chain": {
+            "stages": [s["stage"] for s in stage_results],
+            "stages_detail": stage_results,
+            "homogenization_pressure_bar": homogenization_pressure_bar,
+            "stirrer_on": stirrer_on,
+            "jacket_flow_L_min": jacket_flow_L_min,
         },
         "cip": {
             "wastewater_volume_L": wastewater.volume_L,
@@ -345,7 +342,8 @@ def print_report(report: dict) -> None:
     """Print a human-readable report to stdout."""
     print("=" * 60)
     print("ICE CREAM MANUFACTURING & WASTEWATER VALORIZATION SIMULATOR")
-    print("Full cycle report: Mixing → CIP → Filtration → Bioplastic")
+    print("Full cycle: Industrial chain → CIP → Filtration → Bioplastic")
+    print("(Mixing at start in preparation; aeration in freezer)")
     print("=" * 60)
     r = report
     inp = r.get("inputs", {})
@@ -353,13 +351,14 @@ def print_report(report: dict) -> None:
     print(f"  Raw materials (kg):     {inp.get('raw_materials_kg', 0):.2f}")
     print(f"  Tank surface area (m²): {inp.get('tank_surface_area_m2', 0):.2f}")
     print(f"  Cleaning water (L):     {inp.get('cleaning_water_L', 0):.2f}")
-    print(f"  Air overrun:            {inp.get('air_overrun', 0.5)}")
-    print(f"  Interface flush (L):    {inp.get('interface_flush_L', 0):.2f}")
+    print(f"  Air overrun (freezer):  {inp.get('air_overrun', 0.5)}")
+    print(f"  Interface flush (L):   {inp.get('interface_flush_L', 0):.2f}")
     print(f"  Include cleaning:      {inp.get('include_cleaning_phase', True)}")
-    print(f"  Temperature (K):       {inp.get('temperature_K', 278):.1f}  RPM: {inp.get('rpm', 60)}")
+    print(f"  Homogenization (bar):  {inp.get('homogenization_pressure_bar')}  Stirrer: {inp.get('stirrer_on')}  Jacket (L/min): {inp.get('jacket_flow_L_min')}")
+    print(f"  Preparation: RPM {inp.get('preparation_rpm')}  time {inp.get('preparation_mixing_time_s')} s")
 
     mix = r.get("mixer", {})
-    print("\n--- MIXER ---")
+    print("\n--- INDUSTRIAL CHAIN (product out) ---")
     print(f"  Product to freezer (kg): {mix.get('product_to_freezer_kg', 0):.2f}")
     print(f"  Ice cream volume (L):    {mix.get('ice_cream_volume_L', 0):.2f}")
     print(f"  Tank residue (kg):       {mix.get('tank_residue_kg', 0):.2f}")

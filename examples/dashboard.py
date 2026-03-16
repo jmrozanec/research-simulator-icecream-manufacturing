@@ -3,7 +3,7 @@ Monitoring Dashboard — Streamlit app to follow simulation stages in real time.
 
 Run with: streamlit run examples/dashboard.py
 
-Single pipeline: Mixer → CIP → Filtration → Bioplastic (MaterialBatch flow).
+Single pipeline: Industrial chain → CIP → Filtration → Bioplastic (MaterialBatch flow).
 
 Requires: pip install streamlit
 """
@@ -19,7 +19,6 @@ import streamlit as st
 from icecream_simulator import (
     RawMaterials,
     run_full_cycle,
-    DefaultMixerModel,
     DefaultBioconversionModel,
 )
 
@@ -108,7 +107,6 @@ if run_btn:
         tank_surface_area_m2=float(tank_surface_m2),
         water_volume_L=float(water_volume_L),
         bioplastic_yield_coefficient=float(bioplastic_yield),
-        mixing_model=DefaultMixerModel(),
         bioconversion_model=DefaultBioconversionModel(yield_coefficient=float(bioplastic_yield)),
         on_stage_complete=on_stage_complete,
         air_overrun=float(air_overrun),
