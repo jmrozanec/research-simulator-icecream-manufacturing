@@ -18,7 +18,8 @@ def main() -> None:
         milk=100.0,
         cream=30.0,
         sugar=25.0,
-        stabilizers=2.0,
+        stabilizers=1.65,
+        emulsifiers_kg=0.35,
         water=43.0,
     )
 

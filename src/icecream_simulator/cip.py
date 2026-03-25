@@ -32,8 +32,7 @@ class CIPInput:
 
 def wash_efficiency(detergent_type: str) -> float:
     """
-    Fraction of residue that is transferred into the water phase (dilution/wash).
-    Insert custom detergent/wash model here (e.g. solubility, kinetics).
+    Fraction of residue transferred into the wash water (empirical by detergent class).
     """
     efficiencies = {"alkaline": 0.92, "acid": 0.88, "neutral": 0.85, "enzyme": 0.95}
     return efficiencies.get(detergent_type.lower(), 0.90)
@@ -60,8 +59,7 @@ def run_cip(inputs: CIPInput) -> WastewaterStream:
         total_volume_L = 1e-6
     tss_mg_L = (solids_kg * 1e6) / total_volume_L
 
-    # BOD/COD from organics (sugar + fat) in the stream
-    # Insert custom BOD/COD correlation here (e.g. from TOC, sugar, fat).
+    # BOD/COD from organics (sugar + fat) in the stream (typical COD/BOD ratio for dairy)
     bod_kg = dissolved_sugar_kg * 1.2 + residue_into_water_kg * residue.composition.fat * 2.0
     cod_kg = bod_kg * 1.5  # COD typically ~1.2–1.5 × BOD for organics
     bod_mg_L = (bod_kg * 1e6) / total_volume_L

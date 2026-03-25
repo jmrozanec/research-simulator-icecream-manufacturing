@@ -126,9 +126,12 @@ class WastewaterStream(BaseModel):
 
     @property
     def total_sugar_kg(self) -> float:
-        """Total sugar (dissolved + in TSS) for downstream valorization."""
-        # Approximate: TSS includes some solids; sugar is part of organics
-        return self.dissolved_sugar_kg  # + optional TSS-sugar if modeled
+        """Dissolved sugar plus carbohydrate fraction attributed to TSS (wash-off particulates)."""
+        if self.volume_L <= 0:
+            return self.dissolved_sugar_kg
+        tss_kg = (self.tss_mg_L * 1e-6) * self.volume_L
+        sugar_from_tss_kg = tss_kg * 0.12
+        return self.dissolved_sugar_kg + sugar_from_tss_kg
 
 
 # ---------------------------------------------------------------------------

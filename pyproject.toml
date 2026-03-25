@@ -20,6 +20,9 @@ dev = [
 dashboard = [
     "streamlit>=1.28",
 ]
+config = [
+    "pyyaml>=6.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

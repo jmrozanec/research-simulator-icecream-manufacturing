@@ -85,12 +85,29 @@ def _composition_from_raw_materials(rm: RawMaterials) -> Composition:
     total = rm.total_mass
     if total <= 0:
         return Composition(fat=0, sugar=0, water=0, solids=0)
-    fat_mass = rm.milk * 0.04 + rm.cream * 0.36
+    # Egg yolk: ~25% fat, ~10% solids (protein), remainder water (handbook splits).
+    egg_fat = rm.egg_yolk_kg * 0.25
+    egg_solid = rm.egg_yolk_kg * 0.10
+    egg_water = rm.egg_yolk_kg * 0.65
+    # Vanilla extract: approximate as dilute aqueous ethanol extract.
+    ve_water = rm.vanilla_extract_kg * 0.65
+    ve_solid = rm.vanilla_extract_kg * 0.35
+    fat_mass = rm.milk * 0.04 + rm.cream * 0.36 + egg_fat
+    solids_mass = (
+        rm.milk * 0.09
+        + rm.stabilizers
+        + rm.emulsifiers_kg
+        + rm.cocoa_powder_kg
+        + egg_solid
+        + ve_solid
+        + rm.vanillin_kg
+    )
+    water_mass = rm.water + egg_water + ve_water
     return Composition(
         fat=fat_mass / total,
         sugar=rm.sugar / total,
-        water=rm.water / total,
-        solids=(rm.milk * 0.09 + rm.stabilizers) / total,  # MSNF + stabilizers
+        water=water_mass / total,
+        solids=solids_mass / total,
     )
 
 
@@ -99,6 +116,8 @@ def viscosity_power_law(
     shear_rate_1_s: float,
     stabilizer_fraction: float,
     sugar_fraction: float,
+    hydrocolloid_fraction: float | None = None,
+    emulsifier_fraction: float | None = None,
     k_consistency: float = 1.0,
     n_power: float = 0.5,
     temp_coeff: float = -0.02,
@@ -108,18 +127,22 @@ def viscosity_power_law(
     Power Law fluid viscosity: μ = k * (shear_rate)^(n-1) with temperature
     and composition effects.
 
-    PLUG-IN: Replace this with your own viscosity model (e.g. Arrhenius,
-    Carreau-Yasuda, or an ML/PIML surrogate trained on rheometer data).
-    Default: shear-thinning (n < 1), viscosity increases as T drops and
-    stabilizers/sugar increase.
+    Hydrocolloids (``hydrocolloid_fraction``) raise viscosity strongly; emulsifiers
+    (``emulsifier_fraction``) add a smaller contribution. If not given, legacy
+    ``stabilizer_fraction`` is treated as total hydrocolloid-like solids.
     """
-    # Shear-thinning: apparent viscosity decreases with shear rate
     shear_term = max(1e-6, shear_rate_1_s) ** (n_power - 1.0)
-    # Temperature: viscosity increases as T decreases (temp_coeff < 0)
     temp_factor = 1.0 + temp_coeff * (temperature_K - T_ref)
     temp_factor = max(0.1, temp_factor)
-    # Composition: stabilizers and sugar increase viscosity
-    comp_factor = 1.0 + 2.0 * stabilizer_fraction + 0.5 * sugar_fraction
+    if hydrocolloid_fraction is not None and emulsifier_fraction is not None:
+        comp_factor = (
+            1.0
+            + 2.4 * hydrocolloid_fraction
+            + 0.85 * emulsifier_fraction
+            + 0.5 * sugar_fraction
+        )
+    else:
+        comp_factor = 1.0 + 2.0 * stabilizer_fraction + 0.5 * sugar_fraction
     return k_consistency * shear_term * temp_factor * comp_factor
 
 
@@ -127,8 +150,7 @@ def mixing_power(W: float, mu: float, N_rps: float, D_m: float) -> float:
     """
     Power draw (W) for agitated vessel: P = K·μ·N²·D³.
 
-    PLUG-IN: Replace K or the whole formula with your power number /
-    correlation (e.g. from impeller type, Re, or CFD).
+    Uses laminar power number K=2; replace via ``MixerModelBase`` for other impellers.
     """
     K = 2.0  # Power number ~2 for typical radial impeller in laminar regime
     return K * mu * (N_rps**2) * (D_m**3)
@@ -145,8 +167,7 @@ def residue_mass_kg(
     Residue mass stuck to tank walls: function of viscosity and surface area.
     Higher viscosity => more stickiness => more waste.
 
-    PLUG-IN: Replace with your own loss/fouling model (e.g. empirical,
-    CFD adhesion, or ML-predicted residue from viscosity + geometry).
+    Empirical wall-loss scaling; override via ``MixerModelBase`` for plant-specific fouling.
     """
     viscosity_factor = (viscosity_Pa_s / reference_viscosity) ** 0.5
     area_factor = tank_surface_area_m2 / reference_area_m2
@@ -175,19 +196,21 @@ def run_mixer(inputs: MixerInput) -> tuple[ProductBatch, TankResidue, float]:
 
     comp = _composition_from_raw_materials(rm)
     T = inputs.initial_temperature_K
+    w_h = rm.stabilizers / total_mass
+    w_e = rm.emulsifiers_kg / total_mass
     # Shear rate from RPM and diameter (simplified): gamma ~ N * D / gap
     N_rps = inputs.rpm / 60.0
-    shear_rate = N_rps * inputs.impeller_diameter_m * 10.0  # 1/s, insert custom formula here
+    shear_rate = N_rps * inputs.impeller_diameter_m * 10.0  # 1/s
 
-    # --- Insert custom viscosity formula here ---
     mu = viscosity_power_law(
         temperature_K=T,
         shear_rate_1_s=shear_rate,
         stabilizer_fraction=comp.solids,
         sugar_fraction=comp.sugar,
+        hydrocolloid_fraction=w_h,
+        emulsifier_fraction=w_e,
     )
 
-    # --- Insert custom power formula here ---
     power_W = mixing_power(
         W=0, mu=mu, N_rps=N_rps, D_m=inputs.impeller_diameter_m
     )
@@ -205,6 +228,10 @@ def run_mixer(inputs: MixerInput) -> tuple[ProductBatch, TankResidue, float]:
         temperature_K=T,
         viscosity_Pa_s=mu,
         composition=comp,
+        metadata={
+            "w_hydrocolloid_mass_fraction": w_h,
+            "w_emulsifier_mass_fraction": w_e,
+        },
     )
     tank_residue = TankResidue(
         mass_kg=residue_kg,

@@ -44,10 +44,9 @@ def run_bioconversion(
 ) -> BioplasticOutput:
     """
     Convert sugar in retentate to bioplastic (e.g. PHA).
-    Formula: Mass_PHA = Mass_Sugar × Yield_Coefficient.
 
-    PLUG-IN: Replace with your own bioconversion model (e.g. Monod
-    kinetics, Ralstonia eutropha growth model, or ML yield predictor).
+    Mass_PHA = Mass_Sugar × Yield_Coefficient. Use ``BioconversionModelBase``
+    subclasses for Monod kinetics or other pathways.
     """
     sugar_kg = retentate.sugar_mass_kg
     # Yield in kg PHA per kg sugar

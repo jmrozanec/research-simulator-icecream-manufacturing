@@ -1,8 +1,29 @@
 # Ice Cream Production & Waste-to-Plastic Simulator
 
-A modular Python simulation framework for integrated **ice cream manufacturing** and **waste-to-plastic conversion**. One pipeline: **MaterialBatch** flows through the **industrial chain** (7 steps), then CIP → Filtration → Bioplastic. Mass balance includes operational loss (residue + interface flush). Wastewater comes from CIP that cleans the preparation tank (mixer at the start), the ageing vat, and the interface flush; it then feeds sugar valorization to PHA.
+This repository is a Python simulation of **industrial ice cream manufacture** wired together with a **wastewater and bioplastic** path: what leaves the line as wash water can be traced through filtration and into a simple sugar-to-PHA conversion. The idea is not to pretend every plant matches one recipe, but to give you a **consistent mass and energy story** from raw mix to packaged product, with enough physics hooks that you can align the model to papers, pilot data, or your own measurements.
 
-**Mixing vs aeration:** Blending of ingredients happens only in **step 1 (preparation mix)**, at hot temperature so sugar and stabilizers dissolve and fat is liquid. **No air** is added there. **Aeration (overrun)** is done later in **step 6 (continuous freezer)**, where air is incorporated into the cold mix. So: mix first (liquid) → pasteurize → homogenize → cool → age → freeze + aerate → harden.
+Mixing and aeration are kept separate on purpose: **blending** happens hot in the preparation tank (no air), and **overrun** is applied in the continuous freezer, which matches how the literature and most plant descriptions order the steps.
+
+### Where the process description comes from
+
+The step order (mix → pasteurise → homogenise → cool → age → freeze with air → harden) is the one you see in reviews and textbooks. A convenient single reference for the equipment narrative is:
+
+> Harfoush, A., Fan, Z., Goddik, L., & Haapala, K. R. (2024). A review of ice cream manufacturing process and system improvement strategies. *Manufacturing Letters*, *41*, 170–181. [https://doi.org/10.1016/j.mfglet.2024.09.021](https://doi.org/10.1016/j.mfglet.2024.09.021)
+
+**Mapping (review Fig. 2 → this codebase):**
+
+| Typical industrial step (review) | Simulator stage |
+|-----------------------------------|-----------------|
+| 1. Ingredient mixing | `preparation_mix` |
+| 2. Pasteurization | `pasteurization` (+ hold / lethality in `industrial_physics`) |
+| 3. Homogenization | `homogenization` |
+| 4. Aging (after cooling) | `cooling_phe` then `ageing_vat` |
+| 5. Flavor/color (often before freezer) | `flavor_inclusions` |
+| 6. Continuous / dynamic freezing (SSHE, air) | `freezer` |
+| 7. Inclusions & packing (plant-dependent) | `packaging` (after `hardening` in our chain) |
+| 8. Hardening | `hardening` |
+
+A PDF of that review is in `papers/icecream-01.pdf`. Additional PDFs in the same folder back **literature recipe presets** (Giudici, Konstantas, and reference entries for Cook–Hartel and scheduling); see `literature_recipes.py` and the [capabilities doc](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md).
 
 ## Process flow
 
@@ -16,7 +37,8 @@ Raw Materials
 │  2. Pasteurization (PHE ~80°C)  3. Homogenization (pressure)             │
 │  4. Cooling (PHE 80→30→5°C)  5. Ageing vat (jacketed, stirrer)           │
 │  6. Freezer (overrun = aeration here)  7. Hardening                      │
-│  Residues: prep tank + ageing vat + interface flush → combined for CIP    │
+│  Optional: storage (distribution freezer, recrystallization)               │
+│  Residues: prep tank + ageing vat + interface flush → combined for CIP     │
 └─────────────────────────────────────────────────────────────────────────┘
       │
       ▼
@@ -37,22 +59,29 @@ Raw Materials
 
 ## Features
 
-- **Industrial chain only:** Preparation mix → Pasteurization → Homogenization → Cooling PHE → Ageing vat → Freezer (overrun) → Hardening. **Wastewater** comes from CIP: cleaning the **preparation tank** (mixer at the start), the **ageing vat**, and the **interface flush** (start-of-run discard). Each stage is simulated (heat duties, viscosity vs pressure, residue vs stirrer, etc.).
-- **MaterialBatch** (mass, T, μ, composition) through all stages
-- **CIP:** Wash efficiency, wastewater with TSS, BOD, FOG, dissolved sugar
-- **Filtration:** Darcy-style fouling, permeate/retentate, filter saturation & maintenance
-- **Bioconversion:** Mass_PHA = Mass_Sugar × yield coefficient; **pluggable** via `BioconversionModelBase`
-- **Optional cleaning phase** (skip CIP/filtration/bioconversion for production-only runs)
-- **Typed report** (`MaterialBatchCycleReport`), `report["industrial_chain"]["stages_detail"]` per-stage outputs, and `mass_balance_closed`
+- **Industrial chain:** Preparation through packaging, with optional **post-hardening storage** to mimic distribution temperatures and extra ice ripening.
+- **Research-grade ice path:** Separate **hydrocolloid** and **emulsifier** masses, **wall vs bulk** crystal populations, **Gompertz and Avrami** frozen-fraction models, barrel and storage **recrystallization**, and **Kelvin** reporting—see `industrial_physics.py` and the [capabilities doc](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md).
+- **Calibration without forked code:** All of those coefficients can be driven from one **`CrystallizationParameters`** object, or from **JSON / YAML** on disk, so you can fit a product line or archive settings next to lab data (details below).
+- **Literature presets:** Named batches tied to papers and tables (`literature_recipes.py`); run them all with `python run.py --literature-suite`.
+- **MaterialBatch** (mass, temperature, viscosity, composition) through the chain; **CIP**, **filtration**, and **bioconversion** with pluggable bioconversion; **typed report** and mass balance checks.
 
-**Docs:** [Capabilities and sample run](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md) · [Industrial flow and extensions](docs/INDUSTRIAL_FLOW_AND_EXTENSIONS.md).
+**Longer read:** [Capabilities and sample run](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md) — process scope, presets, and how to use calibration files.
+
+### Calibrating ice and texture (JSON / YAML)
+
+The built-in numbers are a reasonable starting point, not a claim about your plant. For work that needs to line up with microscopy, laser diffraction, or sensory data, use **`CrystallizationParameters`**:
+
+- **In code:** `run_full_cycle(crystallization_parameters=...)` with an instance built in Python or validated from a dict.
+- **From a file:** `load_crystallization_parameters_from_json("path.json")`, or `load_crystallization_parameters("path.yaml")` after `pip install ".[config]"` (adds PyYAML).
+
+Start from `examples/crystallization_parameters_example.json`: copy it, set a descriptive `name`, and edit only the coefficients you are fitting. Omitted fields keep the library defaults. Each run stores the full parameter snapshot under `report["inputs"]["crystallization_parameters"]` so results stay traceable.
 
 ## Installation
 
 ```bash
 pip install -e .
-# or
-pip install -r requirements.txt
+# optional: YAML loaders for calibration files
+pip install -e ".[config]"
 ```
 
 ## Quick start
@@ -61,7 +90,9 @@ pip install -r requirements.txt
 from icecream_simulator import RawMaterials, run_full_cycle, print_report
 
 report = run_full_cycle(
-    raw_materials=RawMaterials(milk=100, cream=30, sugar=25, stabilizers=2, water=43),
+    raw_materials=RawMaterials(
+        milk=100, cream=30, sugar=25, stabilizers=1.65, emulsifiers_kg=0.35, water=43
+    ),
     tank_surface_area_m2=10.0,
     water_volume_L=80.0,
     bioplastic_yield_coefficient=0.4,
@@ -74,7 +105,9 @@ print_report(report)
 
 ## Extensibility
 
-Plug in your own bioplastic conversion by implementing `BioconversionModelBase`. Custom preparation rheology (e.g. PIML viscosity) can be added by extending `industrial_chain.run_preparation_mix` (which uses `mixer.run_mixer` internally).
+- **Bioplastic:** Implement `BioconversionModelBase` and pass it to `run_full_cycle`.
+- **Mixing rheology:** Subclass `MixerModelBase` or extend `run_preparation_mix` / `mixer.run_mixer`.
+- **Ice and texture:** Adjust `CrystallizationParameters` or load from file; no need to edit `industrial_physics` unless you add new physics.
 
 ```python
 from icecream_simulator import run_full_cycle, DefaultBioconversionModel
@@ -84,34 +117,33 @@ report = run_full_cycle(
 )
 ```
 
-Other plug-in points are marked **PLUG-IN** in the source (e.g. homogenization viscosity factor, ageing residue, `bioconversion.run_bioconversion`).
-
 ## Project structure
 
 ```
 src/icecream_simulator/
 ├── __init__.py
-├── schemas.py          # RawMaterials, MassBalanceState, StageResult
-├── batch_models.py     # MaterialBatch, WastewaterStream, RetentateStream, FilterState, etc.
-├── mixer.py            # Rheology, P=K·μ·N²·D³, residue; MixerModelBase, DefaultMixerModel
-├── cip.py              # CIP → WastewaterStream
-├── filtration.py       # Darcy/fouling, permeate + retentate, filter health
-├── bioconversion.py    # Sugar → PHA; BioconversionModelBase, DefaultBioconversionModel
-├── run_full_cycle.py   # Full cycle (industrial chain → CIP → Filtration → Bioplastic) + report
-├── industrial_chain.py # 7-step chain: preparation (mixing) → pasteurization → homogenization → cooling → ageing → freezer (aeration) → hardening
-└── models/             # (Reserved for future shared abstractions)
+├── schemas.py                    # RawMaterials, MassBalanceState, StageResult
+├── crystallization_parameters.py  # CrystallizationParameters, JSON/YAML loaders
+├── batch_models.py               # MaterialBatch, streams, reports
+├── mixer.py
+├── cip.py
+├── filtration.py
+├── bioconversion.py
+├── run_full_cycle.py
+├── industrial_chain.py
+├── industrial_physics.py
+├── literature_recipes.py
+└── models/
     └── __init__.py
 ```
 
 ## Run the simulator
 
-From the project root (default parameters, report to stdout):
-
 ```bash
 python run.py
-# or
+python run.py --preset GIUDICI_2021_INDUSTRIAL
+python run.py --literature-suite --no-cleaning
 uv run python run.py
-# or
 python -m icecream_simulator.run_full_cycle
 ```
 
@@ -119,9 +151,10 @@ python -m icecream_simulator.run_full_cycle
 
 ```bash
 python examples/basic_usage.py
-python examples/custom_piml_mixing.py   # Custom bioconversion
-python examples/sample_run_verbose.py  # Verbose data flow
+python examples/custom_piml_mixing.py
+python examples/sample_run_verbose.py
 python examples/run_material_batch_cycle.py
+python examples/literature_presets.py
 ```
 
 ## Monitoring dashboard
@@ -130,8 +163,6 @@ python examples/run_material_batch_cycle.py
 pip install streamlit
 streamlit run examples/dashboard.py
 ```
-
-Stage-by-stage view: Industrial chain → CIP → Filtration → Bioplastic, with summary and mass balance.
 
 ## License
 

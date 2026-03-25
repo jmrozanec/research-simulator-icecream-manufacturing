@@ -1,0 +1,8 @@
+{
+  "name": "example_product_line",
+  "wall_hydrocolloid_suppression": 0.28,
+  "bulk_hydrocolloid_suppression": 0.36,
+  "kinetic_blend_gompertz_weight": 0.5,
+  "kinetic_blend_avrami_weight": 0.5,
+  "storage_hydrocolloid_retardation": 0.45
+}

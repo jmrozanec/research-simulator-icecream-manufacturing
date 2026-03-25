@@ -19,11 +19,16 @@ from icecream_simulator.bioconversion import (
     DefaultBioconversionModel,
 )
 from icecream_simulator.batch_models import (
-    TankResidue,
     WastewaterStream,
     MaterialBatchCycleReport,
 )
 from icecream_simulator.industrial_chain import run_industrial_chain
+from icecream_simulator import industrial_physics as phys
+from icecream_simulator import literature_recipes as lit
+from icecream_simulator.crystallization_parameters import (
+    DEFAULT_CRYSTALLIZATION_PARAMETERS,
+    CrystallizationParameters,
+)
 
 # Mix density (kg/L) for volume and interface flush
 MIX_DENSITY_KG_L = 1.05
@@ -34,8 +39,55 @@ def _thermal_properties_from_composition(water_fraction: float) -> tuple[float, 
     return (0.4 + 0.2 * water_fraction, 3500.0 + 500.0 * water_fraction)
 
 
+def _quality_summary(stage_results: list[dict], product_metadata: dict) -> dict:
+    """Aggregate key quality metrics from stage results and final product metadata."""
+    out: dict = {}
+    for s in stage_results:
+        st = s.get("stage")
+        if st == "pasteurization":
+            out["log10_pathogen_reduction"] = s.get("log10_pathogen_reduction")
+            out["d_value_minutes_at_hold_T"] = s.get("d_value_minutes_at_hold_T")
+        elif st == "homogenization":
+            out["fat_globule_d32_um"] = s.get("fat_globule_d32_um")
+        elif st == "ageing_vat":
+            out["fat_crystallinity_fraction"] = s.get("fat_crystallinity_fraction")
+        elif st == "freezer":
+            out["air_overrun_effective"] = s.get("air_overrun_effective")
+            out["ice_crystal_wall_um"] = s.get("ice_crystal_wall_um")
+            out["ice_crystal_bulk_um"] = s.get("ice_crystal_bulk_um")
+            out["ice_crystal_volume_mean_um"] = s.get("ice_crystal_volume_mean_um")
+            out["ice_crystal_primary_um"] = s.get("ice_crystal_primary_um")
+            out["ice_crystal_mean_um"] = s.get("ice_crystal_mean_um")
+            out["gompertz_frozen_water_fraction"] = s.get("gompertz_frozen_water_fraction")
+            out["avrami_frozen_water_fraction"] = s.get("avrami_frozen_water_fraction")
+            out["frozen_water_fraction_kinetic_blend"] = s.get("frozen_water_fraction_kinetic_blend")
+            out["initial_freezing_point_mix_C"] = s.get("initial_freezing_point_mix_C")
+            out["kelvin_freezing_point_depression_for_mean_crystal_K"] = s.get(
+                "kelvin_freezing_point_depression_for_mean_crystal_K"
+            )
+            out["dasher_shaft_power_W"] = s.get("dasher_shaft_power_W")
+            out["crystallization_parameters_name"] = s.get("crystallization_parameters_name")
+        elif st == "storage_recrystallization":
+            out["storage_time_s"] = s.get("storage_time_s")
+            out["storage_temp_K"] = s.get("storage_temp_K")
+            out["ice_crystal_mean_um_before_storage"] = s.get("ice_crystal_mean_um_before_storage")
+            out["ice_crystal_mean_um"] = s.get("ice_crystal_mean_um")
+            out["kelvin_freezing_point_depression_for_mean_crystal_K"] = s.get(
+                "kelvin_freezing_point_depression_for_mean_crystal_K"
+            )
+            out["hardness_proxy_kPa"] = s.get("hardness_proxy_kPa")
+            out["melt_rate_proxy_per_s"] = s.get("melt_rate_proxy_per_s")
+        elif st == "packaging":
+            out["package_count"] = s.get("package_count")
+            out["net_mass_kg_per_package"] = s.get("net_mass_kg_per_package")
+    out["hardness_proxy_kPa"] = product_metadata.get("hardness_proxy_kPa")
+    out["melt_rate_proxy_per_s"] = product_metadata.get("melt_rate_proxy_per_s")
+    return out
+
+
 def run_full_cycle(
     raw_materials: Optional[RawMaterials] = None,
+    literature_preset_id: Optional[str] = None,
     tank_surface_area_m2: float = 10.0,
     water_volume_L: float = 80.0,
     bioplastic_yield_coefficient: float = 0.4,
@@ -49,24 +101,37 @@ def run_full_cycle(
     jacket_flow_L_min: float = 20.0,
     preparation_rpm: float = 60.0,
     preparation_mixing_time_s: float = 300.0,
+    pasteurization_hold_time_s: float = 15.0,
+    flavor_syrup_mass_kg: float = 0.0,
+    inclusion_mass_kg: float = 0.0,
+    coolant_temp_K: float = 253.15,
+    freezer_residence_time_s: float = 45.0,
+    dasher_rpm: float = 55.0,
+    barrel_diameter_m: float = 0.15,
+    package_count: int = 1,
+    volume_fraction_wall_ice: float = 0.28,
+    storage_time_s: float = 0.0,
+    storage_temp_K: float = 248.15,
+    crystallization_parameters: Optional[CrystallizationParameters] = None,
 ) -> dict:
     """
-    Run one full cycle: Industrial chain (preparation → pasteurization →
-    homogenization → cooling → ageing → freezer → hardening) → CIP → Filtration →
-    Bioconversion when include_cleaning_phase. Mixing (blending) is only in
-    preparation; aeration (overrun) is applied in the freezer stage.
+    Run one full cycle: Industrial chain (preparation through packaging) → CIP →
+    Filtration → Bioconversion when include_cleaning_phase.
 
     Returns a report dict with efficiency, plastic yield, mass_balance_closed,
     and per-stage industrial_chain details.
 
     Args:
-        raw_materials: Input recipe; default 200 kg batch if None.
+        raw_materials: Input recipe; default 200 kg batch if None. Ignored when
+            ``literature_preset_id`` is set (preset supplies recipe and optional flavor).
+        literature_preset_id: If set, load ``RawMaterials`` and optional flavor/inclusion
+            masses from ``literature_recipes.LITERATURE_PRESETS`` (see module docstring).
         tank_surface_area_m2: Tank surface for residue (preparation + ageing).
         water_volume_L: CIP water volume (when include_cleaning_phase=True).
         bioplastic_yield_coefficient: Used only if bioconversion_model is None.
         bioconversion_model: Pluggable bioconversion; DefaultBioconversionModel if None.
         on_stage_complete: Optional callback (stage_name, StageResult, cumulative).
-        air_overrun: Volume overrun (0.5 = 50%); applied in freezer stage only.
+        air_overrun: Requested overrun fraction; freezer applies effective overrun.
         interface_flush_L: Start-of-run discard (L); added to CIP feed.
         include_cleaning_phase: If False, skip CIP/filtration/bioconversion.
         homogenization_pressure_bar: Homogenizer pressure (e.g. 150–250 bar).
@@ -74,15 +139,49 @@ def run_full_cycle(
         jacket_flow_L_min: Ageing vat cooling jacket flow (L/min).
         preparation_rpm: Preparation mix agitator RPM.
         preparation_mixing_time_s: Preparation mix duration (s).
+        pasteurization_hold_time_s: Isothermal hold at pasteurization outlet (s).
+        flavor_syrup_mass_kg: Flavor syrup mass added after ageing (kg).
+        inclusion_mass_kg: Particulate inclusions mass (kg).
+        coolant_temp_K: SSHE evaporator / coolant temperature (K).
+        freezer_residence_time_s: Mean residence time in continuous freezer (s).
+        dasher_rpm: Dasher rotational speed.
+        barrel_diameter_m: SSHE barrel diameter for power scaling (m).
+        package_count: Number of packages for mass allocation.
+        volume_fraction_wall_ice: Volume fraction of ice attributed to wall nucleation in SSHE
+            (Cook & Hartel; used in wall/bulk volume mean).
+        storage_time_s: Post-hardening storage duration for Ostwald ripening (0 skips).
+        storage_temp_K: Storage temperature (K) for recrystallization step.
+        crystallization_parameters: Optional tuned coefficients for ice kinetics, wall/bulk
+            SSHE, storage ripening, Kelvin, and hardness (defaults match built-in physics).
     """
-    raw = raw_materials or RawMaterials(
-        milk=100.0, cream=30.0, sugar=25.0, stabilizers=2.0, water=43.0
-    )
-    total_input_kg = raw.total_mass
+    preset_meta: dict = {}
+    if literature_preset_id:
+        preset = lit.get_preset(literature_preset_id)
+        raw = preset.raw_materials
+        flavor_syrup_mass_kg = preset.flavor_syrup_mass_kg
+        inclusion_mass_kg = preset.inclusion_mass_kg
+        preset_meta = {
+            "literature_preset_id": preset.id,
+            "literature_citation": preset.citation,
+            "literature_paper_pdf": preset.paper_pdf,
+            "literature_table_or_section": preset.table_or_section,
+            "literature_notes": preset.notes,
+        }
+    else:
+        raw = raw_materials or RawMaterials(
+            milk=100.0,
+            cream=30.0,
+            sugar=25.0,
+            stabilizers=1.65,
+            emulsifiers_kg=0.35,
+            water=43.0,
+        )
+    total_input_kg = raw.total_mass + max(0.0, flavor_syrup_mass_kg) + max(0.0, inclusion_mass_kg)
     bioconv_impl = bioconversion_model or DefaultBioconversionModel(
         yield_coefficient=bioplastic_yield_coefficient
     )
     cumulative: dict = {"product_kg": 0.0, "energy_consumed": 0.0}
+    cparams = crystallization_parameters or DEFAULT_CRYSTALLIZATION_PARAMETERS
 
     # Industrial chain only: preparation (mixing) → pasteurization → homogenization →
     # cooling → ageing → freezer (aeration) → hardening
@@ -96,6 +195,18 @@ def run_full_cycle(
         jacket_flow_L_min=jacket_flow_L_min,
         preparation_rpm=preparation_rpm,
         preparation_mixing_time_s=preparation_mixing_time_s,
+        pasteurization_hold_time_s=pasteurization_hold_time_s,
+        flavor_syrup_mass_kg=flavor_syrup_mass_kg,
+        inclusion_mass_kg=inclusion_mass_kg,
+        coolant_temp_K=coolant_temp_K,
+        freezer_residence_time_s=freezer_residence_time_s,
+        dasher_rpm=dasher_rpm,
+        barrel_diameter_m=barrel_diameter_m,
+        package_count=package_count,
+        volume_fraction_wall_ice=volume_fraction_wall_ice,
+        storage_time_s=storage_time_s,
+        storage_temp_K=storage_temp_K,
+        crystallization_parameters=cparams,
     )
     product_to_freezer_kg = final_product.mass_kg
     residue_kg = cip_residue.metadata.get("prep_kg", 0) + cip_residue.metadata.get("ageing_kg", 0)
@@ -104,7 +215,8 @@ def run_full_cycle(
     mixer_efficiency = (product_to_freezer_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
     cumulative["product_kg"] = product_to_freezer_kg
     cumulative["energy_consumed"] = power_W
-    thermal_conductivity, specific_heat = _thermal_properties_from_composition(product_batch.composition.water)
+    thermal_conductivity, _ = _thermal_properties_from_composition(product_batch.composition.water)
+    specific_heat = phys.specific_heat_mix_J_kgK(product_batch.composition)
     if on_stage_complete:
         mb = MassBalanceState(
             stage="industrial_chain",
@@ -234,9 +346,9 @@ def run_full_cycle(
     )
     plastic_yield_from_total_input = (pha_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
 
-    # Mass balance: input = product to freezer + loss (residue + interface flush). Water is external.
+    # Mass balance: raw + flavor + inclusions = packaged product + prep residue + ageing residue + interface flush.
     total_out_kg = product_to_freezer_kg + cip_residue.mass_kg
-    mass_balance_closed = abs(total_input_kg - total_out_kg) < 1e-6
+    mass_balance_closed = abs(total_input_kg - total_out_kg) < 1e-5
 
     if on_stage_complete:
         mb = MassBalanceState(
@@ -264,7 +376,9 @@ def run_full_cycle(
 
     report = {
         "inputs": {
-            "raw_materials_kg": total_input_kg,
+            **preset_meta,
+            "raw_materials_kg": raw.total_mass,
+            "total_mass_including_additives_kg": total_input_kg,
             "tank_surface_area_m2": tank_surface_area_m2,
             "cleaning_water_L": water_volume_L if include_cleaning_phase else 0.0,
             "air_overrun": air_overrun,
@@ -275,6 +389,19 @@ def run_full_cycle(
             "jacket_flow_L_min": jacket_flow_L_min,
             "preparation_rpm": preparation_rpm,
             "preparation_mixing_time_s": preparation_mixing_time_s,
+            "pasteurization_hold_time_s": pasteurization_hold_time_s,
+            "flavor_syrup_mass_kg": flavor_syrup_mass_kg,
+            "inclusion_mass_kg": inclusion_mass_kg,
+            "coolant_temp_K": coolant_temp_K,
+            "freezer_residence_time_s": freezer_residence_time_s,
+            "dasher_rpm": dasher_rpm,
+            "barrel_diameter_m": barrel_diameter_m,
+            "package_count": package_count,
+            "volume_fraction_wall_ice": volume_fraction_wall_ice,
+            "storage_time_s": storage_time_s,
+            "storage_temp_K": storage_temp_K,
+            "crystallization_parameters_name": cparams.name,
+            "crystallization_parameters": cparams.model_dump(),
         },
         "mixer": {
             "product_to_freezer_kg": product_to_freezer_kg,
@@ -324,6 +451,7 @@ def run_full_cycle(
             "maintenance_required": maintenance_flag,
             "mass_balance_closed": mass_balance_closed,
         },
+        "quality": _quality_summary(stage_results, product_batch.metadata),
     }
     report["typed_report"] = MaterialBatchCycleReport(
         raw_materials_kg=total_input_kg,
@@ -356,6 +484,20 @@ def print_report(report: dict) -> None:
     print(f"  Include cleaning:      {inp.get('include_cleaning_phase', True)}")
     print(f"  Homogenization (bar):  {inp.get('homogenization_pressure_bar')}  Stirrer: {inp.get('stirrer_on')}  Jacket (L/min): {inp.get('jacket_flow_L_min')}")
     print(f"  Preparation: RPM {inp.get('preparation_rpm')}  time {inp.get('preparation_mixing_time_s')} s")
+    print(f"  Pasteurization hold:     {inp.get('pasteurization_hold_time_s')} s")
+    print(f"  SSHE: coolant {inp.get('coolant_temp_K')} K  residence {inp.get('freezer_residence_time_s')} s  dasher {inp.get('dasher_rpm')} rpm  barrel {inp.get('barrel_diameter_m')} m")
+    print(
+        f"  Wall ice vol. frac.:      {inp.get('volume_fraction_wall_ice')}  "
+        f"storage {inp.get('storage_time_s')} s @ {inp.get('storage_temp_K')} K"
+    )
+    print(f"  Packages:                 {inp.get('package_count')}  flavor {inp.get('flavor_syrup_mass_kg')} kg  inclusions {inp.get('inclusion_mass_kg')} kg")
+    if inp.get("literature_preset_id"):
+        print(f"  Literature preset:        {inp.get('literature_preset_id')}")
+        cit = inp.get("literature_citation") or ""
+        if len(cit) > 100:
+            print(f"  Citation:                 {cit[:100]}…")
+        else:
+            print(f"  Citation:                 {cit}")
 
     mix = r.get("mixer", {})
     print("\n--- INDUSTRIAL CHAIN (product out) ---")
@@ -368,6 +510,52 @@ def print_report(report: dict) -> None:
     print(f"  Thermal cond. (W/(m·K)): {mix.get('thermal_conductivity_W_mK', 0):.3f}")
     print(f"  Specific heat (J/(kg·K)): {mix.get('specific_heat_J_kgK', 0):.0f}")
     print(f"  Mixer efficiency (%):    {mix.get('mixer_efficiency_pct', 0)}")
+
+    q = r.get("quality", {})
+    if q:
+        print("\n--- QUALITY (physics-based) ---")
+        if q.get("log10_pathogen_reduction") is not None:
+            print(f"  Log10 pathogen reduction:  {q.get('log10_pathogen_reduction'):.3f}")
+        if q.get("fat_globule_d32_um") is not None:
+            print(f"  Fat globule d32 (µm):       {q.get('fat_globule_d32_um'):.4f}")
+        if q.get("fat_crystallinity_fraction") is not None:
+            print(f"  Fat crystallinity:         {q.get('fat_crystallinity_fraction'):.4f}")
+        if q.get("ice_crystal_wall_um") is not None:
+            print(f"  Ice crystal wall (µm):       {q.get('ice_crystal_wall_um'):.2f}")
+        if q.get("ice_crystal_bulk_um") is not None:
+            print(f"  Ice crystal bulk (µm):       {q.get('ice_crystal_bulk_um'):.2f}")
+        if q.get("ice_crystal_volume_mean_um") is not None:
+            print(f"  Ice vol.-mean d (µm):        {q.get('ice_crystal_volume_mean_um'):.2f}")
+        if q.get("ice_crystal_primary_um") is not None:
+            print(f"  Ice crystal primary (µm):    {q.get('ice_crystal_primary_um'):.2f}")
+        if q.get("ice_crystal_mean_um") is not None:
+            print(f"  Ice crystal mean (µm):       {q.get('ice_crystal_mean_um'):.2f}")
+        if q.get("gompertz_frozen_water_fraction") is not None:
+            print(f"  Gompertz frozen H2O frac:   {q.get('gompertz_frozen_water_fraction'):.4f}")
+        if q.get("avrami_frozen_water_fraction") is not None:
+            print(f"  Avrami frozen H2O frac:     {q.get('avrami_frozen_water_fraction'):.4f}")
+        if q.get("frozen_water_fraction_kinetic_blend") is not None:
+            print(f"  Kinetic blend (G+A)/2:      {q.get('frozen_water_fraction_kinetic_blend'):.4f}")
+        if q.get("storage_time_s"):
+            print(
+                f"  Storage:                     {q.get('storage_time_s')} s, "
+                f"crystal before storage (µm): {q.get('ice_crystal_mean_um_before_storage')}"
+            )
+        if q.get("initial_freezing_point_mix_C") is not None:
+            print(f"  Initial freezing pt mix (°C): {q.get('initial_freezing_point_mix_C'):.3f}")
+        if q.get("kelvin_freezing_point_depression_for_mean_crystal_K") is not None:
+            print(
+                "  Kelvin ΔT mean crystal (K): "
+                f"{q.get('kelvin_freezing_point_depression_for_mean_crystal_K'):.6f}"
+            )
+        if q.get("air_overrun_effective") is not None:
+            print(f"  Overrun effective:         {q.get('air_overrun_effective'):.4f}")
+        if q.get("dasher_shaft_power_W") is not None:
+            print(f"  Dasher shaft power (W):    {q.get('dasher_shaft_power_W'):.4f}")
+        if q.get("hardness_proxy_kPa") is not None:
+            print(f"  Hardness proxy (kPa):      {q.get('hardness_proxy_kPa'):.2f}")
+        if q.get("melt_rate_proxy_per_s") is not None:
+            print(f"  Melt rate proxy (1/s):     {q.get('melt_rate_proxy_per_s'):.6f}")
 
     cip = r.get("cip", {})
     print("\n--- CIP (Wastewater) ---")

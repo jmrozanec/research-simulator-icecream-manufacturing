@@ -207,3 +207,6 @@ marimo/_lsp/
 __marimo__/
 *.tar.gz
 docs/INDUSTRIAL_FLOW_AND_EXTENSIONS.md
+*.DS_Store
+docs/SIMULATOR_SPEC.md
+papers

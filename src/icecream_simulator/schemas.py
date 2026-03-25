@@ -22,13 +22,52 @@ class RawMaterials(BaseModel):
     milk: float = Field(ge=0, description="Milk mass (kg)")
     cream: float = Field(ge=0, description="Cream mass (kg)")
     sugar: float = Field(ge=0, description="Sugar mass (kg)")
-    stabilizers: float = Field(ge=0, description="Stabilizers mass (kg)")
+    stabilizers: float = Field(
+        ge=0,
+        description="Hydrocolloid / polysaccharide stabilisers mass (kg); ice-growth suppression",
+    )
+    emulsifiers_kg: float = Field(
+        default=0.0,
+        ge=0,
+        description="Emulsifier mass (kg; e.g. mono-/diglycerides); fat–water interface, distinct from hydrocolloids",
+    )
     water: float = Field(ge=0, description="Water mass (kg)")
+    cocoa_powder_kg: float = Field(
+        default=0.0,
+        ge=0,
+        description="Cocoa powder mass (kg); counted as solids in composition (e.g. chocolate formulations)",
+    )
+    egg_yolk_kg: float = Field(
+        default=0.0,
+        ge=0,
+        description="Pasteurised egg yolk mass (kg); fat + solids + water split in composition",
+    )
+    vanilla_extract_kg: float = Field(
+        default=0.0,
+        ge=0,
+        description="Vanilla extract mass (kg); mostly water + volatile solids (Konstantas Table 2–style)",
+    )
+    vanillin_kg: float = Field(
+        default=0.0,
+        ge=0,
+        description="Vanillin / flavour solid mass (kg); trace solids in composition",
+    )
 
     @property
     def total_mass(self) -> float:
         """Total mass of raw materials (kg)."""
-        return self.milk + self.cream + self.sugar + self.stabilizers + self.water
+        return (
+            self.milk
+            + self.cream
+            + self.sugar
+            + self.stabilizers
+            + self.emulsifiers_kg
+            + self.water
+            + self.cocoa_powder_kg
+            + self.egg_yolk_kg
+            + self.vanilla_extract_kg
+            + self.vanillin_kg
+        )
 
 
 # ---------------------------------------------------------------------------
