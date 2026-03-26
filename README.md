@@ -12,16 +12,18 @@ The step order (mix → pasteurise → homogenise → cool → age → freeze wi
 
 **Mapping (review Fig. 2 → this codebase):**
 
-| Typical industrial step (review) | Simulator stage |
-|-----------------------------------|-----------------|
-| 1. Ingredient mixing | `preparation_mix` |
-| 2. Pasteurization | `pasteurization` (+ hold / lethality in `industrial_physics`) |
-| 3. Homogenization | `homogenization` |
-| 4. Aging (after cooling) | `cooling_phe` then `ageing_vat` |
-| 5. Flavor/color (often before freezer) | `flavor_inclusions` |
-| 6. Continuous / dynamic freezing (SSHE, air) | `freezer` |
-| 7. Inclusions & packing (plant-dependent) | `packaging` (after `hardening` in our chain) |
-| 8. Hardening | `hardening` |
+
+| Typical industrial step (review)             | Simulator stage                                               |
+| -------------------------------------------- | ------------------------------------------------------------- |
+| 1. Ingredient mixing                         | `preparation_mix`                                             |
+| 2. Pasteurization                            | `pasteurization` (+ hold / lethality in `industrial_physics`) |
+| 3. Homogenization                            | `homogenization`                                              |
+| 4. Aging (after cooling)                     | `cooling_phe` then `ageing_vat`                               |
+| 5. Flavor/color (often before freezer)       | `flavor_inclusions`                                           |
+| 6. Continuous / dynamic freezing (SSHE, air) | `freezer`                                                     |
+| 7. Inclusions & packing (plant-dependent)    | `packaging` (after `hardening` in our chain)                  |
+| 8. Hardening                                 | `hardening`                                                   |
+
 
 A PDF of that review is in `papers/icecream-01.pdf`. Additional PDFs in the same folder back **literature recipe presets** (Giudici, Konstantas, and reference entries for Cook–Hartel and scheduling); see `literature_recipes.py` and the [capabilities doc](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md).
 
@@ -71,15 +73,15 @@ Raw Materials
 
 - **Industrial chain:** Preparation through packaging, with optional **post-hardening storage** to mimic distribution temperatures and extra ice ripening.
 - **Research-grade ice path:** Separate **hydrocolloid** and **emulsifier** masses, **wall vs bulk** crystal populations, **Gompertz and Avrami** frozen-fraction models, barrel and storage **recrystallization**, and **Kelvin** reporting—see `industrial_physics.py` and the [capabilities doc](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md).
-- **Calibration without forked code:** All of those coefficients can be driven from one **`CrystallizationParameters`** object, or from **JSON / YAML** on disk, so you can fit a product line or archive settings next to lab data (details below).
+- **Calibration without forked code:** All of those coefficients can be driven from one `**CrystallizationParameters`** object, or from **JSON / YAML** on disk, so you can fit a product line or archive settings next to lab data (details below).
 - **Literature presets:** Named batches tied to papers and tables (`literature_recipes.py`); run them all with `python run.py --literature-suite`.
-- **MaterialBatch** (mass, temperature, viscosity, composition) through the chain; **CIP**, **pre-filtration**, **hydrodynamic cavitation**, **filtration**, and **bioconversion** with pluggable bioconversion; **typed report** and mass balance checks. See [Wastewater cavitation train](docs/WATER_TREATMENT_CAVITATION.md) for **peer-reviewed references (Gogate & Pandit, DOIs)**, tuning knobs, and optional PDFs under [`papers/`](papers/README.md).
+- **MaterialBatch** (mass, temperature, viscosity, composition) through the chain; **CIP**, **pre-filtration**, **hydrodynamic cavitation**, **filtration**, and **bioconversion** with pluggable bioconversion; **typed report** and mass balance checks. See [Wastewater cavitation train](docs/WATER_TREATMENT_CAVITATION.md) for **peer-reviewed references (Gogate & Pandit, DOIs)**, tuning knobs, and optional PDFs under `[papers/](papers/README.md)`.
 
 **Longer read:** [Capabilities and sample run](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md) — process scope, per-stage sample outputs, presets, and ice calibration. **Wastewater train tuning:** [Wastewater cavitation and pre-filtration](docs/WATER_TREATMENT_CAVITATION.md).
 
 ### Calibrating ice and texture (JSON / YAML)
 
-The built-in numbers are a reasonable starting point, not a claim about your plant. For work that needs to line up with microscopy, laser diffraction, or sensory data, use **`CrystallizationParameters`**:
+The built-in numbers are a reasonable starting point, not a claim about your plant. For work that needs to line up with microscopy, laser diffraction, or sensory data, use `**CrystallizationParameters`**:
 
 - **In code:** `run_full_cycle(crystallization_parameters=...)` with an instance built in Python or validated from a dict.
 - **From a file:** `load_crystallization_parameters_from_json("path.json")`, or `load_crystallization_parameters("path.yaml")` after `pip install ".[config]"` (adds PyYAML).
@@ -151,7 +153,7 @@ src/icecream_simulator/
     └── __init__.py
 
 papers/
-└── README.md                     # Optional local PDFs; cavitation DOIs & suggested filenames
+└── README.md                     
 ```
 
 Docs: `docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md` (capabilities and sample tables), `docs/WATER_TREATMENT_CAVITATION.md` (wastewater stage parameters and cavitation bibliography).
