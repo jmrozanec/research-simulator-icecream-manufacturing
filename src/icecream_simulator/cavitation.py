@@ -12,11 +12,11 @@ This module uses a compact **two-path model** aligned with common HC wastewater 
 (2) **chain scission** of a “macro-organic” pool (proxied from TSS + FOG) into dissolved
 fragments, increasing bioavailability proxy and slightly affecting BOD/COD ratio.
 
-**Literature (place your two PDFs in ``papers/`` and cite them in project docs):**
-typical references for HC in water treatment include Gogate & Pandit (*Advances in Sonochemistry*
-/ ultrasonics and cavitation reviews), and applied HC reactor work on dairy or industrial
-effluents (orifice/Venturi designs, pressure drop vs. cavitation number). Coefficients
-below are **tunable** via ``CavitationConfig`` to match your papers’ operating maps.
+**References (peer-reviewed):** Gogate & Pandit (2004) two-part review in *Advances in Environmental
+Research* on ambient oxidation technologies for wastewater (Part I) and hybrid methods (Part II);
+Gogate & Pandit (2000) *AIChE Journal* on engineering design of **hydrodynamic** cavitation reactors
+(pressure drop, operating conditions). Full citations and DOIs: ``docs/WATER_TREATMENT_CAVITATION.md``.
+Coefficients below are **tunable** via ``CavitationConfig`` to match pilot or literature operating maps.
 """
 
 from __future__ import annotations

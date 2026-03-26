@@ -7,8 +7,8 @@ and membrane units from fouling. Typical: static or drum screens, bag filters.
 **Note:** Only **TSS** is reduced here in a conservative way; dissolved COD/BOD/FOG
 pass through unchanged. Removed solid mass is reported for mass-balance checks.
 
-Place your two cavitation/water-purification PDFs under ``papers/`` and cite them in
-``docs/WATER_TREATMENT_CAVITATION.md`` (see repository docs).
+Cavitation literature (DOIs) is listed in ``docs/WATER_TREATMENT_CAVITATION.md``; optional local
+PDFs can live under ``papers/`` (see ``papers/README.md``).
 """
 
 from __future__ import annotations

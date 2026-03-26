@@ -6,13 +6,13 @@ in that paper. Masses are chosen so ``total_mass`` is typically **200 kg** for c
 runs; where a paper gives **kg per kg of final ice cream** (LCA inventory), the mapping
 to a single mix batch is **documented in ``notes``** and is approximate.
 
-**Papers (repository filenames):**
+**Papers (repository filenames and DOIs):**
 
-- ``icecream-01.pdf`` — Harfoush et al. (2024), *Manufacturing Letters* 41, 170–181 (process review).
-- ``icecream-02.pdf`` — Giudici et al. (2021), *Foods* 10, 334 (batch freezing, crystallization kinetics).
-- ``icecream-03.pdf`` — Konstantas et al. (2019), *J. Cleaner Prod.* 209, 259–272 (LCA; Table 2 inventory).
-- ``icecream-04.pdf`` — Cook & Hartel, mechanisms of ice crystallization (review; no recipe table).
-- ``icecream-05.pdf`` — Wari & Zhu (2019), *Int. J. Prod. Res.* (scheduling; no formulation).
+- ``icecream-01.pdf`` — Harfoush et al. (2024), *Manufacturing Letters* 41, 170–181. https://doi.org/10.1016/j.mfglet.2024.09.021
+- ``icecream-02.pdf`` — Giudici et al. (2021), *Foods* 10(2), 334. https://doi.org/10.3390/foods10020334
+- ``icecream-03.pdf`` — Konstantas et al. (2019), *J. Cleaner Prod.* 209, 259–272. https://doi.org/10.1016/j.jclepro.2018.10.237
+- ``icecream-04.pdf`` — Cook & Hartel (2010), ice crystallization mechanisms. https://doi.org/10.1111/j.1541-4337.2009.00101.x
+- ``icecream-05.pdf`` — Wari & Zhu (2019), *Int. J. Prod. Res.* 57(21), 6648–6664. https://doi.org/10.1080/00207543.2019.1571250
 
 Run all presets::
 
@@ -57,7 +57,7 @@ LITERATURE_PRESETS: dict[str, LiteratureRecipePreset] = {
         citation=(
             "Harfoush, A., Fan, Z., Goddik, L., & Haapala, K. R. (2024). "
             "A review of ice cream manufacturing process and system improvement strategies. "
-            "Manufacturing Letters, 41, 170–181."
+            "Manufacturing Letters, 41, 170–181. DOI 10.1016/j.mfglet.2024.09.021"
         ),
         paper_pdf="icecream-01.pdf",
         table_or_section="Fig. 2 (typical industrial step sequence); process narrative",
@@ -97,7 +97,9 @@ LITERATURE_PRESETS: dict[str, LiteratureRecipePreset] = {
     "GIUDICI_2021_ARTISANAL": LiteratureRecipePreset(
         id="GIUDICI_2021_ARTISANAL",
         citation=(
-            "Giudici et al. (2021), Foods 10(2), 334 — artisanal / gelato-style composition."
+            "Giudici, P., Baiano, A., Chiari, P., De Vero, L., Ghanbarzadeh, B., & Falcone, P. M. (2021). "
+            "Industrial versus artisanal ice cream: Effects of freezing process on properties and microstructure. "
+            "Foods, 10(2), 334. DOI 10.3390/foods10020334 — artisanal / gelato-style composition (Table 2 text)."
         ),
         paper_pdf="icecream-02.pdf",
         table_or_section="Table 2 (text): artisanal — fat 8%, MSNF 7.5%, sweeteners 16%, "
@@ -117,7 +119,7 @@ LITERATURE_PRESETS: dict[str, LiteratureRecipePreset] = {
         citation=(
             "Konstantas, A., Stamford, L., & Azapagic, A. (2019). "
             "Environmental impacts of ice cream and the influence of different ingredients and waste management options. "
-            "Journal of Cleaner Production, 209, 259–272."
+            "Journal of Cleaner Production, 209, 259–272. DOI 10.1016/j.jclepro.2018.10.237"
         ),
         paper_pdf="icecream-03.pdf",
         table_or_section="Table 2 — Vanilla regular: inventory kg/kg ice cream (cream 0.25, sugar 0.15, …)",
@@ -138,7 +140,10 @@ LITERATURE_PRESETS: dict[str, LiteratureRecipePreset] = {
     ),
     "KONSTANTAS_2019_VANILLA_PREMIUM": LiteratureRecipePreset(
         id="KONSTANTAS_2019_VANILLA_PREMIUM",
-        citation="Konstantas et al. (2019), J. Cleaner Prod. 209 — vanilla premium.",
+        citation=(
+            "Konstantas, A., Stamford, L., & Azapagic, A. (2019). "
+            "Journal of Cleaner Production, 209, 259–272. DOI 10.1016/j.jclepro.2018.10.237 — vanilla premium."
+        ),
         paper_pdf="icecream-03.pdf",
         table_or_section="Table 2 — Vanilla premium: cream 0.40, sugar 0.17, … per kg ice cream",
         raw_materials=RawMaterials(
@@ -159,7 +164,10 @@ LITERATURE_PRESETS: dict[str, LiteratureRecipePreset] = {
     ),
     "KONSTANTAS_2019_CHOCOLATE_REGULAR": LiteratureRecipePreset(
         id="KONSTANTAS_2019_CHOCOLATE_REGULAR",
-        citation="Konstantas et al. (2019), J. Cleaner Prod. 209 — chocolate regular.",
+        citation=(
+            "Konstantas, A., Stamford, L., & Azapagic, A. (2019). "
+            "Journal of Cleaner Production, 209, 259–272. DOI 10.1016/j.jclepro.2018.10.237 — chocolate regular."
+        ),
         paper_pdf="icecream-03.pdf",
         table_or_section="Table 2 — Chocolate regular: cocoa powder 0.03 kg/kg ice cream",
         raw_materials=RawMaterials(
@@ -175,7 +183,10 @@ LITERATURE_PRESETS: dict[str, LiteratureRecipePreset] = {
     ),
     "KONSTANTAS_2019_CHOCOLATE_PREMIUM": LiteratureRecipePreset(
         id="KONSTANTAS_2019_CHOCOLATE_PREMIUM",
-        citation="Konstantas et al. (2019), J. Cleaner Prod. 209 — chocolate premium.",
+        citation=(
+            "Konstantas, A., Stamford, L., & Azapagic, A. (2019). "
+            "Journal of Cleaner Production, 209, 259–272. DOI 10.1016/j.jclepro.2018.10.237 — chocolate premium."
+        ),
         paper_pdf="icecream-03.pdf",
         table_or_section="Table 2 — Chocolate premium: cream 0.40, cocoa 0.035, sugar 0.19, …",
         raw_materials=RawMaterials(
@@ -196,8 +207,10 @@ LITERATURE_PRESETS: dict[str, LiteratureRecipePreset] = {
     "COOK_HARTEL_CRYSTALLIZATION_REFERENCE": LiteratureRecipePreset(
         id="COOK_HARTEL_CRYSTALLIZATION_REFERENCE",
         citation=(
-            "Cook, K. L. K., & Hartel, R. W. Mechanisms of ice crystallization in ice cream production "
-            "(review of nucleation, growth, recrystallization; crystal size ranges ~1–150 µm)."
+            "Cook, K. L. K., & Hartel, R. W. (2010). Mechanisms of Ice Crystallization in Ice Cream Production. "
+            "Comprehensive Reviews in Food Science and Food Safety, 9(2), 213–222. "
+            "DOI 10.1111/j.1541-4337.2009.00101.x "
+            "(nucleation, growth, recrystallization; crystal size ranges ~1–150 µm)."
         ),
         paper_pdf="icecream-04.pdf",
         table_or_section="N/A — conceptual review; use with freezer metadata (Kelvin ΔT, mean crystal size)",

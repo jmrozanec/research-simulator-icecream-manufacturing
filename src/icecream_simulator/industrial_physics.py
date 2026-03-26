@@ -7,7 +7,10 @@ populations (Cook & Hartel), **Gompertz and Avrami** frozen-water kinetics, barr
 recrystallization, optional **storage-time** Ostwald ripening, Kelvin (Gibbs–Thomson)
 depression, SSHE dasher power, and hardness / melt proxies. Hydrocolloid and
 emulsifier mass fractions (from batch metadata) modulate viscosity and crystal physics.
-References are noted in each function docstring.
+References are noted in each function docstring. **Wall vs bulk ice** and crystallization narratives follow
+Cook & Hartel (2010), *Comprehensive Reviews in Food Science and Food Safety*, 9(2), 213–222.
+https://doi.org/10.1111/j.1541-4337.2009.00101.x — preset ``COOK_HARTEL_CRYSTALLIZATION_REFERENCE`` / ``icecream-04.pdf``.
+**Gompertz** kinetics align with Giudici et al. (2021), *Foods* 10(2), 334. https://doi.org/10.3390/foods10020334
 """
 
 from __future__ import annotations

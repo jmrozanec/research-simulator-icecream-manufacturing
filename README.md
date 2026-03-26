@@ -73,7 +73,7 @@ Raw Materials
 - **Research-grade ice path:** Separate **hydrocolloid** and **emulsifier** masses, **wall vs bulk** crystal populations, **Gompertz and Avrami** frozen-fraction models, barrel and storage **recrystallization**, and **Kelvin** reporting—see `industrial_physics.py` and the [capabilities doc](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md).
 - **Calibration without forked code:** All of those coefficients can be driven from one **`CrystallizationParameters`** object, or from **JSON / YAML** on disk, so you can fit a product line or archive settings next to lab data (details below).
 - **Literature presets:** Named batches tied to papers and tables (`literature_recipes.py`); run them all with `python run.py --literature-suite`.
-- **MaterialBatch** (mass, temperature, viscosity, composition) through the chain; **CIP**, **pre-filtration**, **hydrodynamic cavitation**, **filtration**, and **bioconversion** with pluggable bioconversion; **typed report** and mass balance checks. See [Wastewater cavitation train](docs/WATER_TREATMENT_CAVITATION.md) for tuning against pilot papers.
+- **MaterialBatch** (mass, temperature, viscosity, composition) through the chain; **CIP**, **pre-filtration**, **hydrodynamic cavitation**, **filtration**, and **bioconversion** with pluggable bioconversion; **typed report** and mass balance checks. See [Wastewater cavitation train](docs/WATER_TREATMENT_CAVITATION.md) for **peer-reviewed references (Gogate & Pandit, DOIs)**, tuning knobs, and optional PDFs under [`papers/`](papers/README.md).
 
 **Longer read:** [Capabilities and sample run](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md) — process scope, per-stage sample outputs, presets, and ice calibration. **Wastewater train tuning:** [Wastewater cavitation and pre-filtration](docs/WATER_TREATMENT_CAVITATION.md).
 
@@ -149,9 +149,12 @@ src/icecream_simulator/
 ├── literature_recipes.py
 └── models/
     └── __init__.py
+
+papers/
+└── README.md                     # Optional local PDFs; cavitation DOIs & suggested filenames
 ```
 
-Docs: `docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md` (capabilities and sample tables), `docs/WATER_TREATMENT_CAVITATION.md` (wastewater stage parameters).
+Docs: `docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md` (capabilities and sample tables), `docs/WATER_TREATMENT_CAVITATION.md` (wastewater stage parameters and cavitation bibliography).
 
 ## Run the simulator
 

@@ -171,6 +171,8 @@ With **`include_cleaning_phase=True`**, the default bioconversion model applies 
 
 **Plug-in:** Tune `CavitationConfig` or replace `cavitation.py`; see [WATER_TREATMENT_CAVITATION.md](WATER_TREATMENT_CAVITATION.md).
 
+**References:** Gogate & Pandit (2004), *Advances in Environmental Research*, Parts I–II — ambient oxidation technologies for wastewater (including cavitation) and hybrid methods; Gogate & Pandit (2000), *AIChE Journal* — engineering design of hydrodynamic cavitation reactors. Full bibliographic entries and DOIs are in [WATER_TREATMENT_CAVITATION.md](WATER_TREATMENT_CAVITATION.md).
+
 ---
 
 ### 3.6 Stage 5 — Filtration (membrane, Darcy-style fouling)
@@ -243,14 +245,14 @@ The README is the short entry point; §5–§6 here go deeper on presets and cal
 
 ### 5.1 Coded presets (`literature_recipes.py`)
 
-The simulator ships **named batches** (typically **200 kg** total `RawMaterials`) tied to PDFs in `papers/` and to **tables or sections** in those papers. Use `run_full_cycle(literature_preset_id="…")` or `python run.py --literature-suite` to exercise **all** presets in one go.
+The simulator ships **named batches** (typically **200 kg** total `RawMaterials`) tied to PDFs in `papers/` and to **tables or sections** in those papers. Full **DOIs** for each PDF are listed in [`papers/README.md`](../papers/README.md) and in `literature_recipes.py` module docstrings. Use `run_full_cycle(literature_preset_id="…")` or `python run.py --literature-suite` to exercise **all** presets in one go.
 
 | Preset id (examples) | Paper (PDF) | Anchor |
 |----------------------|-------------|--------|
 | `HARFOUSH_2024_BASELINE` | `icecream-01.pdf` | Process flow / Fig. 2 narrative |
 | `GIUDICI_2021_INDUSTRIAL`, `GIUDICI_2021_ARTISANAL` | `icecream-02.pdf` | Table 2 text (composition bounds) |
 | `KONSTANTAS_2019_*` (four variants) | `icecream-03.pdf` | Table 2 (kg/kg ice cream inventory); chocolate presets use `cocoa_powder_kg` |
-| `COOK_HARTEL_CRYSTALLIZATION_REFERENCE` | `icecream-04.pdf` | Review (no recipe); use freezer quality fields |
+| `COOK_HARTEL_CRYSTALLIZATION_REFERENCE` | `icecream-04.pdf` | Cook & Hartel (2010) crystallization review; use freezer quality fields |
 | `WARI_ZHU_2019_SCHEDULING_REFERENCE` | `icecream-05.pdf` | Scheduling (no formulation) |
 
 **Konstantas Table 2** lists **life-cycle inventory** per kg of product (including upstream milk for cream and skim), not a single closed **mix recipe**. The coded batches are **illustrative** mappings for process simulation; full LCA mass closure is **out of scope** for this codebase.
