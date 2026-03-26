@@ -1,6 +1,6 @@
 # Ice Cream Production & Waste-to-Plastic Simulator
 
-This repository is a Python simulation of **industrial ice cream manufacture** wired together with a **wastewater and bioplastic** path: what leaves the line as wash water can be traced through filtration and into a simple sugar-to-PHA conversion. The idea is not to pretend every plant matches one recipe, but to give you a **consistent mass and energy story** from raw mix to packaged product, with enough physics hooks that you can align the model to papers, pilot data, or your own measurements.
+This repository is a Python simulation of **industrial ice cream manufacture** wired together with a **wastewater and bioplastic** path: what leaves the line as wash water can be traced through **coarse pre-filtration (TSS)**, **hydrodynamic cavitation** (organic load and fragmentation proxies), **membrane filtration**, and into a simple sugar-to-PHA conversion. The idea is not to pretend every plant matches one recipe, but to give you a **consistent mass and energy story** from raw mix to packaged product, with enough physics hooks that you can align the model to papers, pilot data, or your own measurements.
 
 Mixing and aeration are kept separate on purpose: **blending** happens hot in the preparation tank (no air), and **overrun** is applied in the continuous freezer, which matches how the literature and most plant descriptions order the steps.
 
@@ -48,7 +48,17 @@ Raw Materials
       │
       ▼
 ┌─────────────────────────────────────┐
-│  Filtration                          │  Darcy/fouling → Permeate + Retentate (sugar concentrate)
+│  Pre-filtration                      │  Coarse TSS removal (screen / bag) before HC
+└─────────────────────────────────────┘
+      │
+      ▼
+┌─────────────────────────────────────┐
+│  Hydrodynamic cavitation             │  COD/BOD + fragmentation proxy; bioavailability → bioconv.
+└─────────────────────────────────────┘
+      │
+      ▼
+┌─────────────────────────────────────┐
+│  Filtration (nanofiltration)         │  Darcy/fouling → Permeate + Retentate (sugar concentrate)
 └─────────────────────────────────────┘
       │
       ▼
@@ -63,9 +73,9 @@ Raw Materials
 - **Research-grade ice path:** Separate **hydrocolloid** and **emulsifier** masses, **wall vs bulk** crystal populations, **Gompertz and Avrami** frozen-fraction models, barrel and storage **recrystallization**, and **Kelvin** reporting—see `industrial_physics.py` and the [capabilities doc](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md).
 - **Calibration without forked code:** All of those coefficients can be driven from one **`CrystallizationParameters`** object, or from **JSON / YAML** on disk, so you can fit a product line or archive settings next to lab data (details below).
 - **Literature presets:** Named batches tied to papers and tables (`literature_recipes.py`); run them all with `python run.py --literature-suite`.
-- **MaterialBatch** (mass, temperature, viscosity, composition) through the chain; **CIP**, **filtration**, and **bioconversion** with pluggable bioconversion; **typed report** and mass balance checks.
+- **MaterialBatch** (mass, temperature, viscosity, composition) through the chain; **CIP**, **pre-filtration**, **hydrodynamic cavitation**, **filtration**, and **bioconversion** with pluggable bioconversion; **typed report** and mass balance checks. See [Wastewater cavitation train](docs/WATER_TREATMENT_CAVITATION.md) for tuning against pilot papers.
 
-**Longer read:** [Capabilities and sample run](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md) — process scope, presets, and how to use calibration files.
+**Longer read:** [Capabilities and sample run](docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md) — process scope, per-stage sample outputs, presets, and ice calibration. **Wastewater train tuning:** [Wastewater cavitation and pre-filtration](docs/WATER_TREATMENT_CAVITATION.md).
 
 ### Calibrating ice and texture (JSON / YAML)
 
@@ -100,12 +110,14 @@ report = run_full_cycle(
     interface_flush_L=5.0,
 )
 print_report(report)
-# report["mixer"]["product_to_freezer_kg"], report["industrial_chain"]["stages_detail"], report["bioconversion"]["bioplastic_mass_kg"], etc.
+# report["cip"] — CIP effluent only; report["prefiltration"], report["hydrodynamic_cavitation"],
+# report["wastewater_to_nanofiltration"] — membrane feed after HC; report["filtration"], report["bioconversion"], etc.
 ```
 
 ## Extensibility
 
 - **Bioplastic:** Implement `BioconversionModelBase` and pass it to `run_full_cycle`.
+- **Wastewater:** Call `run_prefiltration` / `run_hydrodynamic_cavitation` with custom `PrefiltrationConfig` / `CavitationConfig`, or fork those modules; defaults are wired in `run_full_cycle` when `include_cleaning_phase=True`.
 - **Mixing rheology:** Subclass `MixerModelBase` or extend `run_preparation_mix` / `mixer.run_mixer`.
 - **Ice and texture:** Adjust `CrystallizationParameters` or load from file; no need to edit `industrial_physics` unless you add new physics.
 
@@ -127,6 +139,8 @@ src/icecream_simulator/
 ├── batch_models.py               # MaterialBatch, streams, reports
 ├── mixer.py
 ├── cip.py
+├── prefiltration.py              # Coarse TSS removal before cavitation / membrane
+├── cavitation.py               # Hydrodynamic cavitation (COD/BOD, fragmentation proxy)
 ├── filtration.py
 ├── bioconversion.py
 ├── run_full_cycle.py
@@ -136,6 +150,8 @@ src/icecream_simulator/
 └── models/
     └── __init__.py
 ```
+
+Docs: `docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md` (capabilities and sample tables), `docs/WATER_TREATMENT_CAVITATION.md` (wastewater stage parameters).
 
 ## Run the simulator
 

@@ -66,4 +66,7 @@ class DefaultBioconversionModel(BioconversionModelBase):
         self.yield_coefficient = yield_coefficient
 
     def run(self, retentate: RetentateStream, **kwargs: object) -> BioplasticOutput:
-        return run_bioconversion(retentate, yield_coefficient=self.yield_coefficient)
+        bio = float(kwargs.get("bioavailability_factor", 1.0))
+        # Cavitation can increase labile carbon; cap so yield stays in a plausible band
+        eff = self.yield_coefficient * min(1.35, max(0.85, bio))
+        return run_bioconversion(retentate, yield_coefficient=eff)

@@ -1,7 +1,8 @@
 """
 Main execution: one full cycle
   Industrial chain (preparation → pasteurization → homogenization → cooling →
-  ageing → freezer → hardening) → CIP → Filtration → Bioplastic.
+  ageing → freezer → hardening) → CIP → pre-filtration → hydrodynamic cavitation →
+  filtration → bioplastic.
 Mixing (blending) is only in the preparation stage; aeration (overrun) is in the freezer.
 Supports optional on_stage_complete callback and pluggable bioconversion_model.
 """
@@ -13,6 +14,8 @@ from typing import Optional
 
 from icecream_simulator.schemas import RawMaterials, MassBalanceState, StageResult
 from icecream_simulator.cip import CIPInput, run_cip
+from icecream_simulator.prefiltration import PrefiltrationConfig, run_prefiltration
+from icecream_simulator.cavitation import CavitationConfig, run_hydrodynamic_cavitation
 from icecream_simulator.filtration import FiltrationConfig, run_filtration
 from icecream_simulator.bioconversion import (
     BioconversionModelBase,
@@ -116,7 +119,8 @@ def run_full_cycle(
 ) -> dict:
     """
     Run one full cycle: Industrial chain (preparation through packaging) → CIP →
-    Filtration → Bioconversion when include_cleaning_phase.
+    Pre-filtration → Hydrodynamic cavitation → Filtration → Bioconversion when
+    include_cleaning_phase and wastewater volume > 0.
 
     Returns a report dict with efficiency, plastic yield, mass_balance_closed,
     and per-stage industrial_chain details.
@@ -273,6 +277,8 @@ def run_full_cycle(
         )
         cip_in = CIPInput(tank_residue=cip_residue, water_volume_L=0.0)
 
+    cip_wastewater_snapshot = wastewater
+
     if on_stage_complete:
         mb = MassBalanceState(
             stage="cip",
@@ -298,7 +304,62 @@ def run_full_cycle(
             dict(cumulative),
         )
 
-    # --- 3. Filtration ---
+    prefiltration_report: dict = {}
+    cavitation_report: dict = {}
+    bioavailability_factor = 1.0
+    if include_cleaning_phase and wastewater.volume_L > 1e-9:
+        wastewater_pre_pref = wastewater
+        wastewater, prefiltration_report = run_prefiltration(
+            wastewater, config=PrefiltrationConfig()
+        )
+        wastewater_pre_cav = wastewater
+        wastewater, cavitation_report = run_hydrodynamic_cavitation(
+            wastewater, config=CavitationConfig()
+        )
+        bioavailability_factor = float(cavitation_report.get("bioavailability_factor", 1.0))
+
+        if on_stage_complete:
+            tss_removed = float(prefiltration_report.get("tss_removed_kg", 0.0))
+            mb_pre = MassBalanceState(
+                stage="prefiltration",
+                mass_in=wastewater_pre_pref.mass_kg,
+                mass_out=wastewater.mass_kg + tss_removed,
+                energy_consumed=0.0,
+                mass_product=wastewater.mass_kg,
+                mass_waste=tss_removed,
+                metadata=prefiltration_report,
+            )
+            on_stage_complete(
+                "prefiltration",
+                StageResult(
+                    stage_name="prefiltration",
+                    mass_balance=mb_pre,
+                    outputs=prefiltration_report,
+                    model_used="Prefiltration",
+                ),
+                dict(cumulative),
+            )
+            mb_cav = MassBalanceState(
+                stage="hydrodynamic_cavitation",
+                mass_in=wastewater_pre_cav.mass_kg,
+                mass_out=wastewater.mass_kg,
+                energy_consumed=cavitation_report.get("energy_proxy_kwh", 0.0) * 3.6e6,
+                mass_product=wastewater.mass_kg,
+                mass_waste=0.0,
+                metadata=cavitation_report,
+            )
+            on_stage_complete(
+                "hydrodynamic_cavitation",
+                StageResult(
+                    stage_name="hydrodynamic_cavitation",
+                    mass_balance=mb_cav,
+                    outputs=cavitation_report,
+                    model_used="HydrodynamicCavitation",
+                ),
+                dict(cumulative),
+            )
+
+    # --- Filtration (after CIP + optional prefiltration + cavitation) ---
     config = FiltrationConfig(
         filter_pore_size_um=0.1,
         membrane_surface_area_m2=10.0,
@@ -338,7 +399,9 @@ def run_full_cycle(
         )
 
     # --- 4. Bioconversion ---
-    bioplastic_out = bioconv_impl.run(retentate)
+    bioplastic_out = bioconv_impl.run(
+        retentate, bioavailability_factor=bioavailability_factor
+    )
     pha_kg = bioplastic_out.mass_kg
     sugar_for_plastic_kg = bioplastic_out.sugar_consumed_kg
     plastic_yield_from_sugar = (
@@ -361,6 +424,7 @@ def run_full_cycle(
             metadata={
                 "yield_coefficient": bioplastic_out.yield_coefficient,
                 "sugar_consumed_kg": sugar_for_plastic_kg,
+                "cavitation_bioavailability_factor": bioavailability_factor,
             },
         )
         on_stage_complete(
@@ -422,13 +486,15 @@ def run_full_cycle(
             "jacket_flow_L_min": jacket_flow_L_min,
         },
         "cip": {
-            "wastewater_volume_L": wastewater.volume_L,
-            "wastewater_mass_kg": wastewater.mass_kg,
-            "dissolved_sugar_kg": wastewater.dissolved_sugar_kg,
-            "tss_mg_L": round(wastewater.tss_mg_L, 2),
-            "bod_mg_L": round(wastewater.bod_mg_L, 2),
-            "fog_mg_L": round(wastewater.fog_mg_L, 2),
+            "wastewater_volume_L": cip_wastewater_snapshot.volume_L,
+            "wastewater_mass_kg": cip_wastewater_snapshot.mass_kg,
+            "dissolved_sugar_kg": cip_wastewater_snapshot.dissolved_sugar_kg,
+            "tss_mg_L": round(cip_wastewater_snapshot.tss_mg_L, 2),
+            "bod_mg_L": round(cip_wastewater_snapshot.bod_mg_L, 2),
+            "fog_mg_L": round(cip_wastewater_snapshot.fog_mg_L, 2),
         },
+        "prefiltration": prefiltration_report if prefiltration_report else None,
+        "hydrodynamic_cavitation": cavitation_report if cavitation_report else None,
         "filtration": {
             "permeate_volume_L": permeate.volume_L,
             "retentate_mass_kg": retentate.mass_kg,
@@ -440,8 +506,16 @@ def run_full_cycle(
             "bioplastic_mass_kg": pha_kg,
             "sugar_consumed_kg": sugar_for_plastic_kg,
             "yield_coefficient": bioplastic_out.yield_coefficient,
+            "cavitation_bioavailability_factor": bioavailability_factor,
             "plastic_yield_from_sugar_pct": round(plastic_yield_from_sugar, 2),
             "plastic_yield_from_input_pct": round(plastic_yield_from_total_input, 4),
+        },
+        "wastewater_to_nanofiltration": {
+            "volume_L": wastewater.volume_L,
+            "tss_mg_L": round(wastewater.tss_mg_L, 2),
+            "cod_mg_L": round(wastewater.cod_mg_L, 2),
+            "bod_mg_L": round(wastewater.bod_mg_L, 2),
+            "fog_mg_L": round(wastewater.fog_mg_L, 2),
         },
         "efficiency_summary": {
             "product_recovery_pct": round(mixer_efficiency, 2),
@@ -470,7 +544,7 @@ def print_report(report: dict) -> None:
     """Print a human-readable report to stdout."""
     print("=" * 60)
     print("ICE CREAM MANUFACTURING & WASTEWATER VALORIZATION SIMULATOR")
-    print("Full cycle: Industrial chain → CIP → Filtration → Bioplastic")
+    print("Full cycle: Industrial chain → CIP → Prefiltration → Cavitation → Filtration → Bioplastic")
     print("(Mixing at start in preparation; aeration in freezer)")
     print("=" * 60)
     r = report
@@ -565,6 +639,29 @@ def print_report(report: dict) -> None:
     print(f"  BOD (mg/L):              {cip.get('bod_mg_L', 0)}")
     print(f"  FOG (mg/L):              {cip.get('fog_mg_L', 0)}")
 
+    pre = r.get("prefiltration")
+    if pre:
+        print("\n--- PREFILTRATION ---")
+        print(f"  TSS before (mg/L):       {pre.get('tss_mg_L_before', 0)}")
+        print(f"  TSS after (mg/L):        {pre.get('tss_mg_L_after', 0)}")
+        print(f"  TSS removed (kg):        {pre.get('tss_removed_kg', 0):.4f}")
+
+    cav = r.get("hydrodynamic_cavitation")
+    if cav:
+        print("\n--- HYDRODYNAMIC CAVITATION ---")
+        print(f"  COD before / after (mg/L): {cav.get('cod_mg_L_before')} → {cav.get('cod_mg_L_after')}")
+        print(f"  BOD before / after (mg/L): {cav.get('bod_mg_L_before')} → {cav.get('bod_mg_L_after')}")
+        print(f"  Mean MW index (after):   {cav.get('mean_mw_index_after', 0):.3f}")
+        print(f"  Bioavailability factor:  {cav.get('bioavailability_factor', 1.0):.3f}")
+        print(f"  Energy proxy (kWh):      {cav.get('energy_proxy_kwh', 0):.4f}")
+
+    wtn = r.get("wastewater_to_nanofiltration", {})
+    if wtn:
+        print("\n--- TO NANOFILTRATION (after HC) ---")
+        print(f"  TSS (mg/L):              {wtn.get('tss_mg_L')}")
+        print(f"  COD (mg/L):              {wtn.get('cod_mg_L')}")
+        print(f"  BOD (mg/L):              {wtn.get('bod_mg_L')}")
+
     flt = r.get("filtration", {})
     print("\n--- FILTRATION ---")
     print(f"  Permeate volume (L):     {flt.get('permeate_volume_L', 0):.2f}")
@@ -578,6 +675,8 @@ def print_report(report: dict) -> None:
     print(f"  Bioplastic produced (kg): {bio.get('bioplastic_mass_kg', 0):.4f}")
     print(f"  Sugar consumed (kg):      {bio.get('sugar_consumed_kg', 0):.4f}")
     print(f"  Yield coefficient:       {bio.get('yield_coefficient', 0)}")
+    if bio.get("cavitation_bioavailability_factor") is not None:
+        print(f"  Cavitation bioavail.:    {bio.get('cavitation_bioavailability_factor')}")
     print(f"  Yield from sugar (%):    {bio.get('plastic_yield_from_sugar_pct', 0)}")
     print(f"  Yield from input (%):    {bio.get('plastic_yield_from_input_pct', 0)}")
 
