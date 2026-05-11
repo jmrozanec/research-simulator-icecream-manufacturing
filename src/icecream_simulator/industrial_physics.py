@@ -22,12 +22,7 @@ from icecream_simulator.crystallization_parameters import (
     DEFAULT_CRYSTALLIZATION_PARAMETERS,
     CrystallizationParameters,
 )
-
-# Specific heats (J/(kg·K)) — food engineering handbook values
-CP_WATER = 4180.0
-CP_FAT = 2010.0
-CP_SUGAR = 1450.0
-CP_SOLIDS_MSNF = 1550.0
+from icecream_simulator import constants as C
 
 
 def specific_heat_mix_J_kgK(comp: Composition) -> float:
@@ -38,13 +33,17 @@ def specific_heat_mix_J_kgK(comp: Composition) -> float:
     """
     w = comp.water + comp.fat + comp.sugar + comp.solids
     if w <= 0:
-        return CP_WATER
-    # Renormalize if fractions do not sum to 1
+        return C.CP_WATER_J_KGK
     fw = comp.fat / w
     sw = comp.sugar / w
     ww = comp.water / w
     sow = comp.solids / w
-    return fw * CP_FAT + sw * CP_SUGAR + ww * CP_WATER + sow * CP_SOLIDS_MSNF
+    return (
+        fw * C.CP_FAT_J_KGK
+        + sw * C.CP_SUGAR_J_KGK
+        + ww * C.CP_WATER_J_KGK
+        + sow * C.CP_SOLIDS_MSNF_J_KGK
+    )
 
 
 def pasteurization_d_value_minutes_at_T_C(T_celsius: float, d_ref_min: float, t_ref_c: float, z_c: float) -> float:
@@ -58,34 +57,50 @@ def pasteurization_d_value_minutes_at_T_C(T_celsius: float, d_ref_min: float, t_
     return d_ref_min * (10.0 ** ((t_ref_c - T_celsius) / z_c))
 
 
-def pasteurization_log10_reduction(t_hold_s: float, T_celsius: float, d_ref_min: float = 0.2, t_ref_c: float = 72.0, z_c: float = 7.0) -> float:
+def pasteurization_log10_reduction(
+    t_hold_s: float,
+    T_celsius: float,
+    d_ref_min: float = C.PASTEUR_D_REF_MIN,
+    t_ref_c: float = C.PASTEUR_T_REF_C,
+    z_c: float = C.PASTEUR_Z_C,
+) -> float:
     """
     Log10 microbial reduction during isothermal hold at T_celsius for t_hold_s.
 
     log10(N0/N) = t_min / D(T)  (first-order Bigelow; t in minutes, D in minutes).
-    Capped at 6 logs (practical detection limit for “sterile” claim avoidance in model).
+    Capped at ``PASTEUR_LOG10_REDUCTION_CAP`` (practical detection limit).
     """
-    t_min = t_hold_s / 60.0
-    if t_min <= 0 or T_celsius < 60.0:
+    t_min = t_hold_s / C.SECONDS_PER_MINUTE
+    if t_min <= 0 or T_celsius < C.PASTEUR_MIN_LETHALITY_T_C:
         return 0.0
     d_t = pasteurization_d_value_minutes_at_T_C(T_celsius, d_ref_min, t_ref_c, z_c)
     if d_t <= 1e-9:
-        return 6.0
-    return min(6.0, t_min / d_t)
+        return C.PASTEUR_LOG10_REDUCTION_CAP
+    return min(C.PASTEUR_LOG10_REDUCTION_CAP, t_min / d_t)
 
 
-def homogenization_fat_globule_d32_um(pressure_bar: float, d32_ref_um: float = 0.85, p_ref_bar: float = 200.0, exponent: float = 0.45) -> float:
+def homogenization_fat_globule_d32_um(
+    pressure_bar: float,
+    d32_ref_um: float = C.HOMOG_D32_REF_UM,
+    p_ref_bar: float = C.HOMOG_P_REF_BAR,
+    exponent: float = C.HOMOG_PRESSURE_EXPONENT,
+) -> float:
     """
     Volume–surface mean fat globule diameter after single-stage homogenization.
 
     Empirical scaling d32 ∝ P^(-b), b ≈ 0.4–0.6 for dairy (Walstra, Dairy Technology).
     d32_um = d32_ref * (P_ref / P)^exponent.
     """
-    p = max(pressure_bar, 1.0)
+    p = max(pressure_bar, C.HOMOG_PRESSURE_FLOOR_BAR)
     return d32_ref_um * ((p_ref_bar / p) ** exponent)
 
 
-def homogenization_apparent_viscosity_Pa_s(mu_in: float, d32_um: float, d32_in_um: float, exponent: float = 0.25) -> float:
+def homogenization_apparent_viscosity_Pa_s(
+    mu_in: float,
+    d32_um: float,
+    d32_in_um: float,
+    exponent: float = C.HOMOG_VISCOSITY_EXPONENT,
+) -> float:
     """
     Apparent viscosity after homogenization from finer emulsion (Pal–Rhodes-type).
 
@@ -93,24 +108,36 @@ def homogenization_apparent_viscosity_Pa_s(mu_in: float, d32_um: float, d32_in_u
     """
     if d32_um <= 0:
         return mu_in
-    ratio = max(d32_in_um, 1e-6) / max(d32_um, 1e-6)
+    ratio = max(d32_in_um, C.HOMOG_D32_FLOOR_UM) / max(d32_um, C.HOMOG_D32_FLOOR_UM)
     return mu_in * (ratio ** exponent)
 
 
-def ageing_fat_crystallinity_fraction(ageing_time_h: float, hold_temp_K: float, tau_h: float = 4.0, t_milk_fat_K: float = 290.0) -> float:
+def ageing_fat_crystallinity_fraction(
+    ageing_time_h: float,
+    hold_temp_K: float,
+    tau_h: float = C.AGEING_TIME_TAU_H_DEFAULT,
+    t_milk_fat_K: float = C.AGEING_T_MILK_FAT_REF_K,
+) -> float:
     """
     Fraction of crystallizable milk fat that has crystallized during ageing (first-order).
 
     X = X_max * (1 - exp(-t/tau)); X_max increases as T approaches milk fat melting zone.
     tau ~ few hours at 4 °C (Hartel, ice cream crystallization).
     """
-    x_max = min(0.75, 0.5 + 0.25 * max(0.0, (t_milk_fat_K - hold_temp_K) / 15.0))
-    return x_max * (1.0 - math.exp(-max(0.0, ageing_time_h) / max(tau_h, 0.1)))
+    x_max = min(
+        C.AGEING_X_MAX_UPPER,
+        C.AGEING_X_MAX_FLOOR
+        + C.AGEING_X_MAX_TEMP_SLOPE_PER_K
+        * max(0.0, (t_milk_fat_K - hold_temp_K) / C.AGEING_X_MAX_TEMP_DENOMINATOR_K),
+    )
+    return x_max * (
+        1.0 - math.exp(-max(0.0, ageing_time_h) / max(tau_h, C.AGEING_TIME_TAU_H_FLOOR))
+    )
 
 
 def ageing_viscosity_after_crystallinity(mu_in: float, crystallinity: float) -> float:
     """Partial fat crystallization increases effective viscosity (crystal network)."""
-    return mu_in * (1.0 + 0.35 * crystallinity)
+    return mu_in * (1.0 + C.AGEING_VISCOSITY_CRYST_COEFF * crystallinity)
 
 
 def ice_crystal_mean_um_sshe(
@@ -133,7 +160,9 @@ def ice_crystal_mean_um_sshe(
     d_b = ice_crystal_bulk_um_sshe(
         residence_time_s, coolant_temp_K, dasher_rpm, product_exit_temp_K, 0.0, 0.0, params=p
     )
-    return ice_crystal_volume_mean_um_from_wall_bulk(d_w, d_b, volume_fraction_wall_ice=0.28, params=p)
+    return ice_crystal_volume_mean_um_from_wall_bulk(
+        d_w, d_b, volume_fraction_wall_ice=C.FREEZER_VOLUME_FRACTION_WALL_ICE, params=p
+    )
 
 
 def ice_crystal_wall_um_sshe(
@@ -152,7 +181,7 @@ def ice_crystal_wall_um_sshe(
     Hydrocolloids and emulsifiers slightly reduce effective wall crystal size (growth limitation).
     """
     p = params or DEFAULT_CRYSTALLIZATION_PARAMETERS
-    t_res = max(residence_time_s, 5.0)
+    t_res = max(residence_time_s, C.FREEZER_RESIDENCE_TIME_FLOOR_S)
     w_h = min(p.wall_max_hydrocolloid_fraction, max(0.0, float(hydrocolloid_mass_fraction)))
     w_e = min(p.wall_max_emulsifier_fraction, max(0.0, float(emulsifier_mass_fraction)))
     delta_t = max(1.0, product_exit_temp_K - coolant_temp_K)
@@ -180,7 +209,7 @@ def ice_crystal_bulk_um_sshe(
     Hydrocolloids suppress ice growth (smaller bulk crystals); emulsifiers have a mild effect.
     """
     p = params or DEFAULT_CRYSTALLIZATION_PARAMETERS
-    t_res = max(residence_time_s, 5.0)
+    t_res = max(residence_time_s, C.FREEZER_RESIDENCE_TIME_FLOOR_S)
     w_h = min(p.bulk_max_hydrocolloid_fraction, max(0.0, float(hydrocolloid_mass_fraction)))
     w_e = min(p.bulk_max_emulsifier_fraction, max(0.0, float(emulsifier_mass_fraction)))
     delta_t = max(1.0, product_exit_temp_K - coolant_temp_K)
@@ -206,8 +235,8 @@ def ice_crystal_volume_mean_um_from_wall_bulk(
     """
     p = params or DEFAULT_CRYSTALLIZATION_PARAMETERS
     f_w = min(p.volume_mean_f_wall_max, max(p.volume_mean_f_wall_min, float(volume_fraction_wall_ice)))
-    dw = max(float(d_wall_um), 1e-6)
-    db = max(float(d_bulk_um), 1e-6)
+    dw = max(float(d_wall_um), C.GENERIC_FLOOR)
+    db = max(float(d_bulk_um), C.GENERIC_FLOOR)
     return (f_w * dw**3 + (1.0 - f_w) * db**3) ** (1.0 / 3.0)
 
 
@@ -218,7 +247,7 @@ def ice_crystal_volume_mean_um_sshe(
     product_exit_temp_K: float,
     hydrocolloid_mass_fraction: float,
     emulsifier_mass_fraction: float,
-    volume_fraction_wall_ice: float = 0.28,
+    volume_fraction_wall_ice: float = C.FREEZER_VOLUME_FRACTION_WALL_ICE,
     params: CrystallizationParameters | None = None,
 ) -> tuple[float, float, float]:
     """
@@ -247,13 +276,18 @@ def ice_crystal_volume_mean_um_sshe(
     return d_w, d_b, d_v
 
 
-def freezer_dasher_shaft_power_W(dynamic_viscosity_Pa_s: float, dasher_rpm: float, barrel_diameter_m: float = 0.15, k_power: float = 2.0) -> float:
+def freezer_dasher_shaft_power_W(
+    dynamic_viscosity_Pa_s: float,
+    dasher_rpm: float,
+    barrel_diameter_m: float = C.FREEZER_DEFAULT_BARREL_DIAMETER_M,
+    k_power: float = C.FREEZER_DASHER_POWER_NUMBER,
+) -> float:
     """
     Shaft power for scraped-surface rotor (laminar analog P ∝ μ N² D³).
 
     Same form as mixer power number; k_power groups geometry.
     """
-    n = dasher_rpm / 60.0
+    n = dasher_rpm / C.SECONDS_PER_MINUTE
     d = barrel_diameter_m
     return k_power * dynamic_viscosity_Pa_s * (n**2) * (d**3)
 
@@ -262,16 +296,21 @@ def freezer_effective_overrun(
     target_overrun: float,
     dasher_rpm: float,
     residence_time_s: float,
-    air_injection_efficiency: float = 0.92,
+    air_injection_efficiency: float = C.FREEZER_AIR_INJECTION_EFFICIENCY,
 ) -> float:
     """
     Effective overrun fraction accounting for dasher shear and residence (air incorporation).
 
     Overrun realized ≈ η_air * target_overrun * (1 - k_loss / (t_res * rpm_scale)).
     """
-    t_res = max(residence_time_s, 5.0)
-    shear_factor = 1.0 - 0.08 * math.exp(-t_res / 200.0) * (1.0 + 0.002 * abs(dasher_rpm - 55.0))
-    return max(0.05, min(1.2, air_injection_efficiency * target_overrun * shear_factor))
+    t_res = max(residence_time_s, C.FREEZER_RESIDENCE_TIME_FLOOR_S)
+    shear_factor = 1.0 - C.FREEZER_OVERRUN_SHEAR_BASE * math.exp(
+        -t_res / C.FREEZER_OVERRUN_TIME_DECAY_S
+    ) * (1.0 + C.FREEZER_OVERRUN_RPM_COEFF * abs(dasher_rpm - C.FREEZER_OVERRUN_RPM_REF))
+    return max(
+        C.FREEZER_OVERRUN_MIN,
+        min(C.FREEZER_OVERRUN_MAX, air_injection_efficiency * target_overrun * shear_factor),
+    )
 
 
 def hardness_proxy_kPa(
@@ -288,7 +327,7 @@ def hardness_proxy_kPa(
     Order-of-magnitude aligned with penetrometry scales (not calibrated to a single product).
     """
     p = params or DEFAULT_CRYSTALLIZATION_PARAMETERS
-    t_c = hardening_temp_K - 273.15
+    t_c = hardening_temp_K - C.KELVIN_TO_CELSIUS_OFFSET
     h = (p.hardness_scale / max(ice_crystal_mean_um, p.hardness_ice_denominator_um)) * (1.0 + overrun_fraction) * (
         1.0 + p.hardness_temp_coeff * abs(t_c + p.hardness_temp_offset_c)
     )
@@ -300,7 +339,7 @@ def hardness_proxy_kPa(
 
 def melt_rate_proxy_per_s(hardness_kPa: float) -> float:
     """Inverse relationship: higher hardness → lower melt rate (relative scale)."""
-    return 0.001 / max(hardness_kPa, 1.0)
+    return C.MELT_RATE_PROXY_NUMERATOR / max(hardness_kPa, 1.0)
 
 
 def initial_freezing_point_mix_celsius(
@@ -315,7 +354,7 @@ def initial_freezing_point_mix_celsius(
     See Giudici et al. (2021) on initial freezing point and supercooling in batch freezing.
     """
     p = params or DEFAULT_CRYSTALLIZATION_PARAMETERS
-    w_s = max(0.0, min(0.5, comp.sugar))
+    w_s = max(0.0, min(C.IFP_SUGAR_FRACTION_CAP, comp.sugar))
     return p.ifp_offset_c + p.ifp_sugar_coefficient * w_s
 
 
@@ -333,7 +372,7 @@ def avrami_frozen_water_fraction_sshe(
     (Christian–Avrami theory; contrast with Gompertz sigmoid in Giudici-style fits).
     """
     p = params or DEFAULT_CRYSTALLIZATION_PARAMETERS
-    t_res = max(residence_time_s, 1.0)
+    t_res = max(residence_time_s, C.KINETICS_TIME_FLOOR_S)
     supercool = max(0.0, float(initial_freezing_point_c) - float(product_exit_temp_c))
     x_max = min(
         p.avrami_x_max_upper,
@@ -360,7 +399,7 @@ def gompertz_frozen_water_fraction_sshe(
     raises the asymptotic frozen fraction.
     """
     p = params or DEFAULT_CRYSTALLIZATION_PARAMETERS
-    t_res = max(residence_time_s, 1.0)
+    t_res = max(residence_time_s, C.KINETICS_TIME_FLOOR_S)
     supercool = float(initial_freezing_point_c) - float(product_exit_temp_c)
     x_max = min(
         p.gompertz_x_max_upper,
@@ -387,7 +426,7 @@ def ice_crystal_mean_um_after_recrystallization(
     Longer residence allows Ostwald-type ripening: d_mean increases slowly with time.
     """
     p = params or DEFAULT_CRYSTALLIZATION_PARAMETERS
-    t_res = max(residence_time_s, 5.0)
+    t_res = max(residence_time_s, C.FREEZER_RESIDENCE_TIME_FLOOR_S)
     factor = 1.0 + p.barrel_ripening_log_coeff * math.log1p(t_res / p.barrel_ripening_time_ref_s)
     d_out = primary_mean_um * factor
     return max(p.barrel_d_min_um, min(p.barrel_d_max_um, d_out))
@@ -423,17 +462,17 @@ def storage_recrystallized_mean_um(
     """
     p = params or DEFAULT_CRYSTALLIZATION_PARAMETERS
     t_s = max(0.0, float(storage_time_s))
-    if t_s <= 1e-6:
+    if t_s <= C.GENERIC_FLOOR:
         return float(mean_um_before_storage)
     w_h = min(p.storage_max_hydrocolloid_fraction, max(0.0, float(hydrocolloid_mass_fraction)))
     w_e = min(p.storage_max_emulsifier_fraction, max(0.0, float(emulsifier_mass_fraction)))
-    t_c = storage_temp_K - 273.15
+    t_c = storage_temp_K - C.KELVIN_TO_CELSIUS_OFFSET
     arr = math.exp(
         min(p.storage_arr_exp_clip, max(-p.storage_arr_exp_clip, (t_c + p.storage_temp_arr_offset_c) / p.storage_temp_arr_divisor))
     )
-    r = p.storage_r_scale * arr * math.log1p(t_s / 3600.0)
+    r = p.storage_r_scale * arr * math.log1p(t_s / C.SECONDS_PER_HOUR)
     r *= 1.0 - p.storage_hydrocolloid_retardation * w_h - p.storage_emulsifier_retardation * w_e
-    d_in = max(float(mean_um_before_storage), 1e-6)
+    d_in = max(float(mean_um_before_storage), C.GENERIC_FLOOR)
     d_out = d_in * (
         1.0
         + r
@@ -459,6 +498,11 @@ def kelvin_freezing_point_depression_K_for_ice_sphere_um(
     less stable than bulk ice at the same T).
     """
     p = params or DEFAULT_CRYSTALLIZATION_PARAMETERS
-    d = max(float(diameter_um), p.kelvin_d_min_um) * 1e-6
-    delta = 4.0 * p.kelvin_gamma_surface_tension * p.kelvin_T_m / (p.kelvin_rho_ice * p.kelvin_L_fusion * d)
+    d = max(float(diameter_um), p.kelvin_d_min_um) * C.METERS_PER_MICROMETER
+    delta = (
+        C.KELVIN_GIBBS_THOMSON_PREFACTOR
+        * p.kelvin_gamma_surface_tension
+        * p.kelvin_T_m
+        / (p.kelvin_rho_ice * p.kelvin_L_fusion * d)
+    )
     return min(p.kelvin_delta_max_K, max(0.0, delta))

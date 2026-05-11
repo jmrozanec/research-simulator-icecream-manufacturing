@@ -19,22 +19,14 @@ from icecream_simulator.crystallization_parameters import (
 from icecream_simulator.batch_models import MaterialBatch, TankResidue, Composition
 from icecream_simulator.mixer import MixerInput, run_mixer
 from icecream_simulator import industrial_physics as phys
-
-T_PREP_K = 328.0
-T_PASTEUR_K = 353.15
-T_AFTER_COOL_K = 278.15
-T_AGEING_K = 277.15
-T_AFTER_FREEZER_K = 268.15
-T_HARDENING_K = 243.15
-
-MIX_DENSITY_KG_L = 1.05
+from icecream_simulator import constants as C
 
 
 def run_preparation_mix(
     raw_materials: RawMaterials,
-    tank_surface_area_m2: float = 10.0,
-    rpm: float = 60.0,
-    mixing_time_s: float = 300.0,
+    tank_surface_area_m2: float = C.DEFAULT_TANK_SURFACE_AREA_M2,
+    rpm: float = C.DEFAULT_RPM,
+    mixing_time_s: float = C.DEFAULT_MIXING_TIME_S,
 ) -> tuple[MaterialBatch, TankResidue, float]:
     """Step 1: High-shear preparation mix at ~55 °C; blending only, no aeration."""
     inp = MixerInput(
@@ -42,7 +34,7 @@ def run_preparation_mix(
         tank_surface_area_m2=tank_surface_area_m2,
         rpm=rpm,
         mixing_time_s=mixing_time_s,
-        initial_temperature_K=T_PREP_K,
+        initial_temperature_K=C.T_PREP_K,
     )
     product_batch, tank_residue, power_W = run_mixer(inp)
     out = MaterialBatch(
@@ -57,16 +49,18 @@ def run_preparation_mix(
 
 def run_pasteurization(
     batch: MaterialBatch,
-    outlet_temp_K: float = T_PASTEUR_K,
-    hold_time_s: float = 15.0,
+    outlet_temp_K: float = C.T_PASTEUR_K,
+    hold_time_s: float = C.DEFAULT_PASTEURIZATION_HOLD_TIME_S,
 ) -> MaterialBatch:
     """Step 2: PHE heat to pasteurization T, isothermal hold, lethality, heat duty with composition-based cp."""
     T_in = batch.temperature_K
     cp = phys.specific_heat_mix_J_kgK(batch.composition)
     heat_duty_J = batch.mass_kg * cp * (outlet_temp_K - T_in)
-    T_c = outlet_temp_K - 273.15
+    T_c = outlet_temp_K - C.KELVIN_TO_CELSIUS_OFFSET
     log10_reduction = phys.pasteurization_log10_reduction(hold_time_s, T_c)
-    d_at_t = phys.pasteurization_d_value_minutes_at_T_C(T_c, 0.2, 72.0, 7.0)
+    d_at_t = phys.pasteurization_d_value_minutes_at_T_C(
+        T_c, C.PASTEUR_D_REF_MIN, C.PASTEUR_T_REF_C, C.PASTEUR_Z_C
+    )
     return MaterialBatch(
         mass_kg=batch.mass_kg,
         temperature_K=outlet_temp_K,
@@ -88,11 +82,11 @@ def run_pasteurization(
 
 def run_homogenization(
     batch: MaterialBatch,
-    pressure_bar: float = 200.0,
-    d32_initial_um: float = 3.0,
+    pressure_bar: float = C.HOMOG_DEFAULT_PRESSURE_BAR,
+    d32_initial_um: float = C.HOMOG_D32_INITIAL_UM,
 ) -> MaterialBatch:
     """Step 3: Homogenizer — fat globule d32 (Walstra scaling) and apparent viscosity (Pal–Rhodes-type)."""
-    p = max(pressure_bar, 1.0)
+    p = max(pressure_bar, C.HOMOG_PRESSURE_FLOOR_BAR)
     d32_um = phys.homogenization_fat_globule_d32_um(p)
     mu_new = phys.homogenization_apparent_viscosity_Pa_s(batch.viscosity_Pa_s, d32_um, d32_initial_um)
     return MaterialBatch(
@@ -112,8 +106,8 @@ def run_homogenization(
 
 def run_cooling_phe(
     batch: MaterialBatch,
-    temp_after_stage1_K: float = 303.15,
-    temp_out_K: float = T_AFTER_COOL_K,
+    temp_after_stage1_K: float = C.T_AFTER_COOL_STAGE1_K,
+    temp_out_K: float = C.T_AFTER_COOL_K,
 ) -> MaterialBatch:
     """Step 4: Two-stage PHE cooling with composition-based cp."""
     cp = phys.specific_heat_mix_J_kgK(batch.composition)
@@ -139,22 +133,27 @@ def run_cooling_phe(
 
 def run_ageing_vat(
     batch: MaterialBatch,
-    tank_surface_area_m2: float = 10.0,
-    hold_temp_K: float = T_AGEING_K,
-    stirrer_on: bool = True,
-    jacket_flow_rate_L_min: float = 20.0,
-    ageing_time_h: float = 4.0,
+    tank_surface_area_m2: float = C.DEFAULT_TANK_SURFACE_AREA_M2,
+    hold_temp_K: float = C.T_AGEING_K,
+    stirrer_on: bool = C.DEFAULT_STIRRER_ON,
+    jacket_flow_rate_L_min: float = C.AGEING_DEFAULT_JACKET_FLOW_L_MIN,
+    ageing_time_h: float = C.AGEING_TIME_H_DEFAULT,
 ) -> tuple[MaterialBatch, TankResidue]:
     """Step 5: Ageing with fat crystallinity (Hartel-type kinetics) and wall residue."""
     comp = batch.composition
     x_cryst = phys.ageing_fat_crystallinity_fraction(ageing_time_h, hold_temp_K)
-    mu_cold = phys.ageing_viscosity_after_crystallinity(batch.viscosity_Pa_s * 1.15, x_cryst)
-    base_per_m2 = 0.02
-    viscosity_factor = (mu_cold / 0.5) ** 0.5 if mu_cold > 0 else 1.0
-    residue_kg = base_per_m2 * tank_surface_area_m2 * viscosity_factor
+    mu_cold = phys.ageing_viscosity_after_crystallinity(
+        batch.viscosity_Pa_s * C.AGEING_VISCOSITY_COLD_MULTIPLIER, x_cryst
+    )
+    viscosity_factor = (
+        (mu_cold / C.AGEING_RESIDUE_REF_VISCOSITY_PA_S) ** C.AGEING_RESIDUE_VISCOSITY_EXPONENT
+        if mu_cold > 0
+        else 1.0
+    )
+    residue_kg = C.AGEING_RESIDUE_BASE_PER_M2 * tank_surface_area_m2 * viscosity_factor
     if not stirrer_on:
-        residue_kg *= 1.5
-    residue_kg = min(residue_kg, batch.mass_kg * 0.03)
+        residue_kg *= C.AGEING_NO_STIRRER_MULTIPLIER
+    residue_kg = min(residue_kg, batch.mass_kg * C.AGEING_RESIDUE_MAX_FRACTION_OF_BATCH)
     product_kg = batch.mass_kg - residue_kg
     product_batch = MaterialBatch(
         mass_kg=product_kg,
@@ -183,8 +182,8 @@ def run_flavor_and_inclusions(
     batch: MaterialBatch,
     flavor_syrup_mass_kg: float,
     inclusion_mass_kg: float,
-    flavor_sugar_mass_fraction: float = 0.45,
-    inclusion_solids_mass_fraction: float = 0.92,
+    flavor_sugar_mass_fraction: float = C.FLAVOR_SUGAR_MASS_FRACTION,
+    inclusion_solids_mass_fraction: float = C.INCLUSION_SOLIDS_MASS_FRACTION,
 ) -> MaterialBatch:
     """
     Step 6: Flavor syrup and particulate inclusions before freezer (mass-balanced composition).
@@ -201,13 +200,13 @@ def run_flavor_and_inclusions(
     sugar_f = m_f * flavor_sugar_mass_fraction
     water_f = m_f * (1.0 - flavor_sugar_mass_fraction)
     solids_i = m_i * inclusion_solids_mass_fraction
-    sugar_i = m_i * 0.08
+    sugar_i = m_i * C.INCLUSION_SUGAR_MASS_FRACTION
     fat_new = (m0 * c.fat) / m_new
     sugar_new = (m0 * c.sugar + sugar_f + sugar_i) / m_new
     water_new = (m0 * c.water + water_f * (m_f > 0)) / m_new
     solids_new = (m0 * c.solids + solids_i) / m_new
     s = fat_new + sugar_new + water_new + solids_new
-    if s > 1.01:
+    if s > C.COMPOSITION_RENORM_THRESHOLD:
         fat_new /= s
         sugar_new /= s
         water_new /= s
@@ -216,7 +215,8 @@ def run_flavor_and_inclusions(
     return MaterialBatch(
         mass_kg=m_new,
         temperature_K=batch.temperature_K,
-        viscosity_Pa_s=batch.viscosity_Pa_s * (1.0 + 0.02 * m_i / max(m0, 1e-6)),
+        viscosity_Pa_s=batch.viscosity_Pa_s
+        * (1.0 + C.INCLUSION_VISCOSITY_BOOST_COEFF * m_i / max(m0, C.MASS_EPSILON_KG)),
         composition=comp,
         metadata={
             **batch.metadata,
@@ -229,13 +229,13 @@ def run_flavor_and_inclusions(
 
 def run_freezer(
     batch: MaterialBatch,
-    air_overrun: float = 0.5,
-    exit_temp_K: float = T_AFTER_FREEZER_K,
-    coolant_temp_K: float = 253.15,
-    residence_time_s: float = 45.0,
-    dasher_rpm: float = 55.0,
-    barrel_diameter_m: float = 0.15,
-    volume_fraction_wall_ice: float = 0.28,
+    air_overrun: float = C.DEFAULT_AIR_OVERRUN,
+    exit_temp_K: float = C.T_AFTER_FREEZER_K,
+    coolant_temp_K: float = C.T_FREEZER_COOLANT_K,
+    residence_time_s: float = C.FREEZER_DEFAULT_RESIDENCE_TIME_S,
+    dasher_rpm: float = C.FREEZER_DEFAULT_DASHER_RPM,
+    barrel_diameter_m: float = C.FREEZER_DEFAULT_BARREL_DIAMETER_M,
+    volume_fraction_wall_ice: float = C.FREEZER_VOLUME_FRACTION_WALL_ICE,
     crystallization_parameters: CrystallizationParameters | None = None,
 ) -> tuple[MaterialBatch, float]:
     """Step 7: SSHE — wall vs bulk ice populations, Gompertz + Avrami kinetics, barrel recrystallization."""
@@ -256,19 +256,19 @@ def run_freezer(
     d_ice = phys.ice_crystal_mean_um_after_recrystallization(d_vol_mean, residence_time_s, params=cparams)
     p_dasher = phys.freezer_dasher_shaft_power_W(batch.viscosity_Pa_s, dasher_rpm, barrel_diameter_m)
     t_ifp_c = phys.initial_freezing_point_mix_celsius(batch.composition, params=cparams)
-    exit_c = exit_temp_K - 273.15
+    exit_c = exit_temp_K - C.KELVIN_TO_CELSIUS_OFFSET
     gompertz_frozen_frac = phys.gompertz_frozen_water_fraction_sshe(residence_time_s, t_ifp_c, exit_c, params=cparams)
     avrami_frozen_frac = phys.avrami_frozen_water_fraction_sshe(residence_time_s, t_ifp_c, exit_c, params=cparams)
     frozen_blend = phys.blended_frozen_water_fraction_kinetics(
         gompertz_frozen_frac, avrami_frozen_frac, params=cparams
     )
     kelvin_dt_k = phys.kelvin_freezing_point_depression_K_for_ice_sphere_um(d_ice, params=cparams)
-    volume_L = batch.mass_kg / MIX_DENSITY_KG_L
+    volume_L = batch.mass_kg / C.MIX_DENSITY_KG_L
     ice_cream_volume_L = volume_L * (1.0 + eff_over)
     out = MaterialBatch(
         mass_kg=batch.mass_kg,
         temperature_K=exit_temp_K,
-        viscosity_Pa_s=batch.viscosity_Pa_s * 1.08,
+        viscosity_Pa_s=batch.viscosity_Pa_s * C.FREEZER_VISCOSITY_EXIT_MULTIPLIER,
         composition=batch.composition,
         metadata={
             **batch.metadata,
@@ -315,12 +315,12 @@ def run_storage_recrystallization(
     cparams = crystallization_parameters or DEFAULT_CRYSTALLIZATION_PARAMETERS
     w_h = float(batch.metadata.get("w_hydrocolloid_mass_fraction", 0.0))
     w_e = float(batch.metadata.get("w_emulsifier_mass_fraction", 0.0))
-    d_before = float(batch.metadata.get("ice_crystal_mean_um", 40.0))
+    d_before = float(batch.metadata.get("ice_crystal_mean_um", C.FREEZER_DEFAULT_ICE_CRYSTAL_MEAN_UM))
     d_out = phys.storage_recrystallized_mean_um(
         d_before, storage_time_s, storage_temp_K, w_h, w_e, params=cparams
     )
     kelvin_dt_k = phys.kelvin_freezing_point_depression_K_for_ice_sphere_um(d_out, params=cparams)
-    ov = float(batch.metadata.get("air_overrun_effective", batch.metadata.get("air_overrun", 0.5)))
+    ov = float(batch.metadata.get("air_overrun_effective", batch.metadata.get("air_overrun", C.DEFAULT_AIR_OVERRUN)))
     blend = batch.metadata.get("frozen_water_fraction_kinetic_blend")
     gompertz = batch.metadata.get("gompertz_frozen_water_fraction")
     avrami = batch.metadata.get("avrami_frozen_water_fraction")
@@ -355,15 +355,15 @@ def run_storage_recrystallization(
 
 def run_hardening(
     batch: MaterialBatch,
-    final_temp_K: float = T_HARDENING_K,
+    final_temp_K: float = C.T_HARDENING_K,
     crystallization_parameters: CrystallizationParameters | None = None,
 ) -> MaterialBatch:
     """Step 8: Hardening tunnel — sensible heat removal, hardness and melt-rate proxies."""
     cparams = crystallization_parameters or DEFAULT_CRYSTALLIZATION_PARAMETERS
     cp = phys.specific_heat_mix_J_kgK(batch.composition)
     Q_removed_J = batch.mass_kg * cp * (batch.temperature_K - final_temp_K)
-    ov = float(batch.metadata.get("air_overrun_effective", batch.metadata.get("air_overrun", 0.5)))
-    d_ice = float(batch.metadata.get("ice_crystal_mean_um", 40.0))
+    ov = float(batch.metadata.get("air_overrun_effective", batch.metadata.get("air_overrun", C.DEFAULT_AIR_OVERRUN)))
+    d_ice = float(batch.metadata.get("ice_crystal_mean_um", C.FREEZER_DEFAULT_ICE_CRYSTAL_MEAN_UM))
     blend = batch.metadata.get("frozen_water_fraction_kinetic_blend")
     gompertz = batch.metadata.get("gompertz_frozen_water_fraction")
     avrami = batch.metadata.get("avrami_frozen_water_fraction")
@@ -386,7 +386,7 @@ def run_hardening(
     return MaterialBatch(
         mass_kg=batch.mass_kg,
         temperature_K=final_temp_K,
-        viscosity_Pa_s=batch.viscosity_Pa_s * 1.05,
+        viscosity_Pa_s=batch.viscosity_Pa_s * C.HARDENING_VISCOSITY_MULTIPLIER,
         composition=batch.composition,
         metadata={
             **batch.metadata,
@@ -423,25 +423,25 @@ def run_packaging(
 
 def run_industrial_chain(
     raw_materials: RawMaterials,
-    tank_surface_area_m2: float = 10.0,
-    homogenization_pressure_bar: float = 200.0,
-    air_overrun: float = 0.5,
-    interface_flush_L: float = 5.0,
-    stirrer_on: bool = True,
-    jacket_flow_L_min: float = 20.0,
-    preparation_rpm: float = 60.0,
-    preparation_mixing_time_s: float = 300.0,
-    pasteurization_hold_time_s: float = 15.0,
-    flavor_syrup_mass_kg: float = 0.0,
-    inclusion_mass_kg: float = 0.0,
-    coolant_temp_K: float = 253.15,
-    freezer_residence_time_s: float = 45.0,
-    dasher_rpm: float = 55.0,
-    barrel_diameter_m: float = 0.15,
-    package_count: int = 1,
-    volume_fraction_wall_ice: float = 0.28,
-    storage_time_s: float = 0.0,
-    storage_temp_K: float = 248.15,
+    tank_surface_area_m2: float = C.DEFAULT_TANK_SURFACE_AREA_M2,
+    homogenization_pressure_bar: float = C.HOMOG_DEFAULT_PRESSURE_BAR,
+    air_overrun: float = C.DEFAULT_AIR_OVERRUN,
+    interface_flush_L: float = C.DEFAULT_INTERFACE_FLUSH_L,
+    stirrer_on: bool = C.DEFAULT_STIRRER_ON,
+    jacket_flow_L_min: float = C.AGEING_DEFAULT_JACKET_FLOW_L_MIN,
+    preparation_rpm: float = C.DEFAULT_RPM,
+    preparation_mixing_time_s: float = C.DEFAULT_MIXING_TIME_S,
+    pasteurization_hold_time_s: float = C.DEFAULT_PASTEURIZATION_HOLD_TIME_S,
+    flavor_syrup_mass_kg: float = C.DEFAULT_FLAVOR_SYRUP_MASS_KG,
+    inclusion_mass_kg: float = C.DEFAULT_INCLUSION_MASS_KG,
+    coolant_temp_K: float = C.T_FREEZER_COOLANT_K,
+    freezer_residence_time_s: float = C.FREEZER_DEFAULT_RESIDENCE_TIME_S,
+    dasher_rpm: float = C.FREEZER_DEFAULT_DASHER_RPM,
+    barrel_diameter_m: float = C.FREEZER_DEFAULT_BARREL_DIAMETER_M,
+    package_count: int = C.DEFAULT_PACKAGE_COUNT,
+    volume_fraction_wall_ice: float = C.FREEZER_VOLUME_FRACTION_WALL_ICE,
+    storage_time_s: float = C.DEFAULT_STORAGE_TIME_S,
+    storage_temp_K: float = C.T_STORAGE_DEFAULT_K,
     crystallization_parameters: CrystallizationParameters | None = None,
 ) -> tuple[MaterialBatch, MaterialBatch, TankResidue, float, float, list[dict]]:
     """
@@ -454,7 +454,7 @@ def run_industrial_chain(
     total_input_kg = raw_materials.total_mass
     if total_input_kg <= 0:
         comp = Composition(fat=0, sugar=0, water=0, solids=0)
-        empty = MaterialBatch(mass_kg=0, temperature_K=T_AGEING_K, viscosity_Pa_s=0, composition=comp)
+        empty = MaterialBatch(mass_kg=0, temperature_K=C.T_AGEING_K, viscosity_Pa_s=0, composition=comp)
         empty_residue = TankResidue(mass_kg=0, composition=comp, viscosity_Pa_s=0)
         return empty, empty, empty_residue, 0.0, 0.0, stage_results
 
@@ -486,7 +486,7 @@ def run_industrial_chain(
         "d_value_minutes_at_hold_T": batch.metadata.get("d_value_minutes_at_hold_T"),
     })
 
-    d32_pre = 3.0
+    d32_pre = C.HOMOG_D32_INITIAL_UM
     batch = run_homogenization(batch, pressure_bar=homogenization_pressure_bar, d32_initial_um=d32_pre)
     stage_results.append({
         "stage": "homogenization",
@@ -533,7 +533,7 @@ def run_industrial_chain(
         "inclusion_mass_kg": inclusion_mass_kg,
     })
 
-    interface_flush_kg = min(interface_flush_L * MIX_DENSITY_KG_L, batch.mass_kg)
+    interface_flush_kg = min(interface_flush_L * C.MIX_DENSITY_KG_L, batch.mass_kg)
     product_kg = batch.mass_kg - interface_flush_kg
     batch_to_freezer = MaterialBatch(
         mass_kg=product_kg,

@@ -32,14 +32,15 @@ from icecream_simulator.crystallization_parameters import (
     DEFAULT_CRYSTALLIZATION_PARAMETERS,
     CrystallizationParameters,
 )
-
-# Mix density (kg/L) for volume and interface flush
-MIX_DENSITY_KG_L = 1.05
+from icecream_simulator import constants as C
 
 
 def _thermal_properties_from_composition(water_fraction: float) -> tuple[float, float]:
     """Thermal conductivity (W/(m·K)) and specific heat (J/(kg·K)) from water fraction (parity with PIML)."""
-    return (0.4 + 0.2 * water_fraction, 3500.0 + 500.0 * water_fraction)
+    return (
+        C.THERMAL_CONDUCTIVITY_INTERCEPT_W_MK + C.THERMAL_CONDUCTIVITY_SLOPE_W_MK * water_fraction,
+        C.SPECIFIC_HEAT_INTERCEPT_J_KGK + C.SPECIFIC_HEAT_SLOPE_J_KGK * water_fraction,
+    )
 
 
 def _quality_summary(stage_results: list[dict], product_metadata: dict) -> dict:
@@ -91,30 +92,30 @@ def _quality_summary(stage_results: list[dict], product_metadata: dict) -> dict:
 def run_full_cycle(
     raw_materials: Optional[RawMaterials] = None,
     literature_preset_id: Optional[str] = None,
-    tank_surface_area_m2: float = 10.0,
-    water_volume_L: float = 80.0,
-    bioplastic_yield_coefficient: float = 0.4,
+    tank_surface_area_m2: float = C.DEFAULT_TANK_SURFACE_AREA_M2,
+    water_volume_L: float = C.CIP_DEFAULT_WATER_VOLUME_L,
+    bioplastic_yield_coefficient: float = C.DEFAULT_YIELD_COEFFICIENT,
     bioconversion_model: Optional[BioconversionModelBase] = None,
     on_stage_complete: Optional[Callable[[str, StageResult, dict], None]] = None,
-    air_overrun: float = 0.5,
-    interface_flush_L: float = 5.0,
+    air_overrun: float = C.DEFAULT_AIR_OVERRUN,
+    interface_flush_L: float = C.DEFAULT_INTERFACE_FLUSH_L,
     include_cleaning_phase: bool = True,
-    homogenization_pressure_bar: float = 200.0,
-    stirrer_on: bool = True,
-    jacket_flow_L_min: float = 20.0,
-    preparation_rpm: float = 60.0,
-    preparation_mixing_time_s: float = 300.0,
-    pasteurization_hold_time_s: float = 15.0,
-    flavor_syrup_mass_kg: float = 0.0,
-    inclusion_mass_kg: float = 0.0,
-    coolant_temp_K: float = 253.15,
-    freezer_residence_time_s: float = 45.0,
-    dasher_rpm: float = 55.0,
-    barrel_diameter_m: float = 0.15,
-    package_count: int = 1,
-    volume_fraction_wall_ice: float = 0.28,
-    storage_time_s: float = 0.0,
-    storage_temp_K: float = 248.15,
+    homogenization_pressure_bar: float = C.HOMOG_DEFAULT_PRESSURE_BAR,
+    stirrer_on: bool = C.DEFAULT_STIRRER_ON,
+    jacket_flow_L_min: float = C.AGEING_DEFAULT_JACKET_FLOW_L_MIN,
+    preparation_rpm: float = C.DEFAULT_RPM,
+    preparation_mixing_time_s: float = C.DEFAULT_MIXING_TIME_S,
+    pasteurization_hold_time_s: float = C.DEFAULT_PASTEURIZATION_HOLD_TIME_S,
+    flavor_syrup_mass_kg: float = C.DEFAULT_FLAVOR_SYRUP_MASS_KG,
+    inclusion_mass_kg: float = C.DEFAULT_INCLUSION_MASS_KG,
+    coolant_temp_K: float = C.T_FREEZER_COOLANT_K,
+    freezer_residence_time_s: float = C.FREEZER_DEFAULT_RESIDENCE_TIME_S,
+    dasher_rpm: float = C.FREEZER_DEFAULT_DASHER_RPM,
+    barrel_diameter_m: float = C.FREEZER_DEFAULT_BARREL_DIAMETER_M,
+    package_count: int = C.DEFAULT_PACKAGE_COUNT,
+    volume_fraction_wall_ice: float = C.FREEZER_VOLUME_FRACTION_WALL_ICE,
+    storage_time_s: float = C.DEFAULT_STORAGE_TIME_S,
+    storage_temp_K: float = C.T_STORAGE_DEFAULT_K,
     crystallization_parameters: Optional[CrystallizationParameters] = None,
 ) -> dict:
     """
@@ -172,14 +173,7 @@ def run_full_cycle(
             "literature_notes": preset.notes,
         }
     else:
-        raw = raw_materials or RawMaterials(
-            milk=100.0,
-            cream=30.0,
-            sugar=25.0,
-            stabilizers=1.65,
-            emulsifiers_kg=0.35,
-            water=43.0,
-        )
+        raw = raw_materials or RawMaterials(**C.DEFAULT_RAW_MATERIALS_KG)
     total_input_kg = raw.total_mass + max(0.0, flavor_syrup_mass_kg) + max(0.0, inclusion_mass_kg)
     bioconv_impl = bioconversion_model or DefaultBioconversionModel(
         yield_coefficient=bioplastic_yield_coefficient
@@ -216,7 +210,9 @@ def run_full_cycle(
     residue_kg = cip_residue.metadata.get("prep_kg", 0) + cip_residue.metadata.get("ageing_kg", 0)
     interface_flush_kg = cip_residue.metadata.get("interface_flush_kg", 0)
     product_batch = final_product
-    mixer_efficiency = (product_to_freezer_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
+    mixer_efficiency = (
+        product_to_freezer_kg / total_input_kg * C.PERCENT_FACTOR
+    ) if total_input_kg > 0 else 0.0
     cumulative["product_kg"] = product_to_freezer_kg
     cumulative["energy_consumed"] = power_W
     thermal_conductivity, _ = _thermal_properties_from_composition(product_batch.composition.water)
@@ -268,7 +264,7 @@ def run_full_cycle(
         wastewater = WastewaterStream(
             volume_L=0.0,
             mass_kg=0.0,
-            temperature_K=323.0,
+            temperature_K=C.CIP_DEFAULT_WATER_TEMP_K,
             tss_mg_L=0.0,
             dissolved_sugar_kg=0.0,
             cod_mg_L=0.0,
@@ -307,7 +303,7 @@ def run_full_cycle(
     prefiltration_report: dict = {}
     cavitation_report: dict = {}
     bioavailability_factor = 1.0
-    if include_cleaning_phase and wastewater.volume_L > 1e-9:
+    if include_cleaning_phase and wastewater.volume_L > C.VOLUME_EPSILON_SMALL_L:
         wastewater_pre_pref = wastewater
         wastewater, prefiltration_report = run_prefiltration(
             wastewater, config=PrefiltrationConfig()
@@ -343,7 +339,7 @@ def run_full_cycle(
                 stage="hydrodynamic_cavitation",
                 mass_in=wastewater_pre_cav.mass_kg,
                 mass_out=wastewater.mass_kg,
-                energy_consumed=cavitation_report.get("energy_proxy_kwh", 0.0) * 3.6e6,
+                energy_consumed=cavitation_report.get("energy_proxy_kwh", 0.0) * C.KWH_TO_JOULES,
                 mass_product=wastewater.mass_kg,
                 mass_waste=0.0,
                 metadata=cavitation_report,
@@ -361,8 +357,8 @@ def run_full_cycle(
 
     # --- Filtration (after CIP + optional prefiltration + cavitation) ---
     config = FiltrationConfig(
-        filter_pore_size_um=0.1,
-        membrane_surface_area_m2=10.0,
+        filter_pore_size_um=C.FILTER_PORE_SIZE_UM,
+        membrane_surface_area_m2=C.FILTER_MEMBRANE_AREA_M2,
     )
     permeate, retentate, filter_state = run_filtration(wastewater, config)
     maintenance_flag = filter_state.maintenance_required
@@ -390,7 +386,7 @@ def run_full_cycle(
                     "permeate_volume_L": permeate.volume_L,
                     "retentate_mass_kg": retentate.mass_kg,
                     "retentate_sugar_kg": retentate.sugar_mass_kg,
-                    "filter_saturation_pct": filter_state.saturation_fraction * 100,
+                    "filter_saturation_pct": filter_state.saturation_fraction * C.PERCENT_FACTOR,
                     "maintenance_required": maintenance_flag,
                 },
                 model_used="Filtration",
@@ -405,13 +401,15 @@ def run_full_cycle(
     pha_kg = bioplastic_out.mass_kg
     sugar_for_plastic_kg = bioplastic_out.sugar_consumed_kg
     plastic_yield_from_sugar = (
-        (pha_kg / sugar_for_plastic_kg * 100.0) if sugar_for_plastic_kg > 0 else 0.0
+        (pha_kg / sugar_for_plastic_kg * C.PERCENT_FACTOR) if sugar_for_plastic_kg > 0 else 0.0
     )
-    plastic_yield_from_total_input = (pha_kg / total_input_kg * 100.0) if total_input_kg > 0 else 0.0
+    plastic_yield_from_total_input = (
+        (pha_kg / total_input_kg * C.PERCENT_FACTOR) if total_input_kg > 0 else 0.0
+    )
 
     # Mass balance: raw + flavor + inclusions = packaged product + prep residue + ageing residue + interface flush.
     total_out_kg = product_to_freezer_kg + cip_residue.mass_kg
-    mass_balance_closed = abs(total_input_kg - total_out_kg) < 1e-5
+    mass_balance_closed = abs(total_input_kg - total_out_kg) < C.MASS_BALANCE_TOLERANCE_KG
 
     if on_stage_complete:
         mb = MassBalanceState(
@@ -499,7 +497,7 @@ def run_full_cycle(
             "permeate_volume_L": permeate.volume_L,
             "retentate_mass_kg": retentate.mass_kg,
             "retentate_sugar_kg": retentate.sugar_mass_kg,
-            "filter_saturation_pct": round(filter_state.saturation_fraction * 100, 2),
+            "filter_saturation_pct": round(filter_state.saturation_fraction * C.PERCENT_FACTOR, 2),
             "maintenance_required": maintenance_flag,
         },
         "bioconversion": {
@@ -520,7 +518,7 @@ def run_full_cycle(
         "efficiency_summary": {
             "product_recovery_pct": round(mixer_efficiency, 2),
             "plastic_kg_per_tonne_input": round(
-                pha_kg / (total_input_kg / 1000.0), 4
+                pha_kg / (total_input_kg / C.KG_PER_TONNE), 4
             ) if total_input_kg > 0 else 0.0,
             "maintenance_required": maintenance_flag,
             "mass_balance_closed": mass_balance_closed,

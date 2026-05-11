@@ -26,6 +26,7 @@ from icecream_simulator.batch_models import (
     TankResidue,
     Composition,
 )
+from icecream_simulator import constants as C
 
 
 # ---------------------------------------------------------------------------
@@ -56,8 +57,8 @@ class MixerModelBase(ABC):
 class MixerGeometry(BaseModel):
     """Mixer tank and impeller geometry for power and residue calculations."""
 
-    tank_surface_area_m2: float = Field(ge=0, default=10.0)
-    impeller_diameter_m: float = Field(ge=0, default=0.5)
+    tank_surface_area_m2: float = Field(ge=0, default=C.DEFAULT_TANK_SURFACE_AREA_M2)
+    impeller_diameter_m: float = Field(ge=0, default=C.DEFAULT_IMPELLER_DIAMETER_M)
 
 
 class MixerInput:
@@ -66,11 +67,11 @@ class MixerInput:
     def __init__(
         self,
         raw_materials: RawMaterials,
-        tank_surface_area_m2: float = 10.0,
-        impeller_diameter_m: float = 0.5,
-        rpm: float = 60.0,
-        mixing_time_s: float = 300.0,
-        initial_temperature_K: float = 278.0,
+        tank_surface_area_m2: float = C.DEFAULT_TANK_SURFACE_AREA_M2,
+        impeller_diameter_m: float = C.DEFAULT_IMPELLER_DIAMETER_M,
+        rpm: float = C.DEFAULT_RPM,
+        mixing_time_s: float = C.DEFAULT_MIXING_TIME_S,
+        initial_temperature_K: float = C.DEFAULT_TEMPERATURE_K,
     ):
         self.raw_materials = raw_materials
         self.tank_surface_area_m2 = tank_surface_area_m2
@@ -85,16 +86,14 @@ def _composition_from_raw_materials(rm: RawMaterials) -> Composition:
     total = rm.total_mass
     if total <= 0:
         return Composition(fat=0, sugar=0, water=0, solids=0)
-    # Egg yolk: ~25% fat, ~10% solids (protein), remainder water (handbook splits).
-    egg_fat = rm.egg_yolk_kg * 0.25
-    egg_solid = rm.egg_yolk_kg * 0.10
-    egg_water = rm.egg_yolk_kg * 0.65
-    # Vanilla extract: approximate as dilute aqueous ethanol extract.
-    ve_water = rm.vanilla_extract_kg * 0.65
-    ve_solid = rm.vanilla_extract_kg * 0.35
-    fat_mass = rm.milk * 0.04 + rm.cream * 0.36 + egg_fat
+    egg_fat = rm.egg_yolk_kg * C.EGG_YOLK_FAT_FRACTION
+    egg_solid = rm.egg_yolk_kg * C.EGG_YOLK_SOLIDS_FRACTION
+    egg_water = rm.egg_yolk_kg * C.EGG_YOLK_WATER_FRACTION
+    ve_water = rm.vanilla_extract_kg * C.VANILLA_EXTRACT_WATER_FRACTION
+    ve_solid = rm.vanilla_extract_kg * C.VANILLA_EXTRACT_SOLIDS_FRACTION
+    fat_mass = rm.milk * C.MILK_FAT_FRACTION + rm.cream * C.CREAM_FAT_FRACTION + egg_fat
     solids_mass = (
-        rm.milk * 0.09
+        rm.milk * C.MILK_MSNF_FRACTION
         + rm.stabilizers
         + rm.emulsifiers_kg
         + rm.cocoa_powder_kg
@@ -118,10 +117,10 @@ def viscosity_power_law(
     sugar_fraction: float,
     hydrocolloid_fraction: float | None = None,
     emulsifier_fraction: float | None = None,
-    k_consistency: float = 1.0,
-    n_power: float = 0.5,
-    temp_coeff: float = -0.02,
-    T_ref: float = 293.0,
+    k_consistency: float = C.RHEOLOGY_K_CONSISTENCY,
+    n_power: float = C.RHEOLOGY_POWER_INDEX_N,
+    temp_coeff: float = C.RHEOLOGY_TEMP_COEFF,
+    T_ref: float = C.RHEOLOGY_TEMP_REF_K,
 ) -> float:
     """
     Power Law fluid viscosity: μ = k * (shear_rate)^(n-1) with temperature
@@ -131,18 +130,22 @@ def viscosity_power_law(
     (``emulsifier_fraction``) add a smaller contribution. If not given, legacy
     ``stabilizer_fraction`` is treated as total hydrocolloid-like solids.
     """
-    shear_term = max(1e-6, shear_rate_1_s) ** (n_power - 1.0)
+    shear_term = max(C.RHEOLOGY_SHEAR_RATE_FLOOR, shear_rate_1_s) ** (n_power - 1.0)
     temp_factor = 1.0 + temp_coeff * (temperature_K - T_ref)
-    temp_factor = max(0.1, temp_factor)
+    temp_factor = max(C.RHEOLOGY_TEMP_FACTOR_FLOOR, temp_factor)
     if hydrocolloid_fraction is not None and emulsifier_fraction is not None:
         comp_factor = (
             1.0
-            + 2.4 * hydrocolloid_fraction
-            + 0.85 * emulsifier_fraction
-            + 0.5 * sugar_fraction
+            + C.RHEOLOGY_HYDROCOLLOID_FACTOR * hydrocolloid_fraction
+            + C.RHEOLOGY_EMULSIFIER_FACTOR * emulsifier_fraction
+            + C.RHEOLOGY_SUGAR_FACTOR * sugar_fraction
         )
     else:
-        comp_factor = 1.0 + 2.0 * stabilizer_fraction + 0.5 * sugar_fraction
+        comp_factor = (
+            1.0
+            + C.RHEOLOGY_LEGACY_SOLIDS_FACTOR * stabilizer_fraction
+            + C.RHEOLOGY_SUGAR_FACTOR * sugar_fraction
+        )
     return k_consistency * shear_term * temp_factor * comp_factor
 
 
@@ -150,18 +153,18 @@ def mixing_power(W: float, mu: float, N_rps: float, D_m: float) -> float:
     """
     Power draw (W) for agitated vessel: P = K·μ·N²·D³.
 
-    Uses laminar power number K=2; replace via ``MixerModelBase`` for other impellers.
+    Uses ``MIXING_POWER_NUMBER`` (≈2 radial, laminar) from constants; override via
+    ``MixerModelBase`` for other impellers.
     """
-    K = 2.0  # Power number ~2 for typical radial impeller in laminar regime
-    return K * mu * (N_rps**2) * (D_m**3)
+    return C.MIXING_POWER_NUMBER * mu * (N_rps**2) * (D_m**3)
 
 
 def residue_mass_kg(
     viscosity_Pa_s: float,
     tank_surface_area_m2: float,
-    reference_viscosity: float = 1.0,
-    reference_area_m2: float = 10.0,
-    base_residue_per_m2_kg: float = 0.05,
+    reference_viscosity: float = C.RESIDUE_REF_VISCOSITY_PA_S,
+    reference_area_m2: float = C.RESIDUE_REF_AREA_M2,
+    base_residue_per_m2_kg: float = C.RESIDUE_BASE_KG_PER_M2,
 ) -> float:
     """
     Residue mass stuck to tank walls: function of viscosity and surface area.
@@ -169,7 +172,7 @@ def residue_mass_kg(
 
     Empirical wall-loss scaling; override via ``MixerModelBase`` for plant-specific fouling.
     """
-    viscosity_factor = (viscosity_Pa_s / reference_viscosity) ** 0.5
+    viscosity_factor = (viscosity_Pa_s / reference_viscosity) ** C.RESIDUE_VISCOSITY_EXPONENT
     area_factor = tank_surface_area_m2 / reference_area_m2
     return base_residue_per_m2_kg * viscosity_factor * area_factor * tank_surface_area_m2
 
@@ -198,9 +201,8 @@ def run_mixer(inputs: MixerInput) -> tuple[ProductBatch, TankResidue, float]:
     T = inputs.initial_temperature_K
     w_h = rm.stabilizers / total_mass
     w_e = rm.emulsifiers_kg / total_mass
-    # Shear rate from RPM and diameter (simplified): gamma ~ N * D / gap
-    N_rps = inputs.rpm / 60.0
-    shear_rate = N_rps * inputs.impeller_diameter_m * 10.0  # 1/s
+    N_rps = inputs.rpm / C.SECONDS_PER_MINUTE
+    shear_rate = N_rps * inputs.impeller_diameter_m * C.SHEAR_RATE_TIP_MULTIPLIER
 
     mu = viscosity_power_law(
         temperature_K=T,
@@ -220,7 +222,7 @@ def run_mixer(inputs: MixerInput) -> tuple[ProductBatch, TankResidue, float]:
         viscosity_Pa_s=mu,
         tank_surface_area_m2=inputs.tank_surface_area_m2,
     )
-    residue_kg = min(residue_kg, total_mass * 0.15)  # Cap at 15% of batch
+    residue_kg = min(residue_kg, total_mass * C.RESIDUE_MAX_FRACTION_OF_BATCH)
     product_kg = total_mass - residue_kg
 
     product_batch = ProductBatch(

@@ -12,6 +12,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from icecream_simulator import constants as C
+
 
 # ---------------------------------------------------------------------------
 # Composition & Contaminant Load (used inside MaterialBatch)
@@ -129,8 +131,8 @@ class WastewaterStream(BaseModel):
         """Dissolved sugar plus carbohydrate fraction attributed to TSS (wash-off particulates)."""
         if self.volume_L <= 0:
             return self.dissolved_sugar_kg
-        tss_kg = (self.tss_mg_L * 1e-6) * self.volume_L
-        sugar_from_tss_kg = tss_kg * 0.12
+        tss_kg = (self.tss_mg_L * C.KG_PER_MG) * self.volume_L
+        sugar_from_tss_kg = tss_kg * C.WASTEWATER_TSS_SUGAR_FRACTION
         return self.dissolved_sugar_kg + sugar_from_tss_kg
 
 
