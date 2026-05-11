@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "icecream-simulator"
-version = "0.3.0"
-description = "Modular simulation framework for ice cream production and waste-to-plastic conversion"
+version = "1.0.0"
+description = "Simplified closed-form ice cream batch + CIP washwater + membrane + PHA yield"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -19,9 +19,6 @@ dev = [
 ]
 dashboard = [
     "streamlit>=1.28",
-]
-config = [
-    "pyyaml>=6.0",
 ]
 
 [tool.setuptools.packages.find]
