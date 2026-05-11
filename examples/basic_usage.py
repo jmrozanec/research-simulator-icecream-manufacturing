@@ -1,42 +1,12 @@
-"""
-Basic Usage: Run one full cycle with default models.
-
-Minimal example: Mixing → CIP → Filtration → Bioconversion.
-"""
-
-import json
-from pathlib import Path
+"""Minimal programmatic example."""
 
 import sys
+from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from icecream_simulator import RawMaterials, run_full_cycle, print_report
+from icecream_simulator import RawMaterials, print_report, run_full_cycle
 
-
-def main() -> None:
-    raw_materials = RawMaterials(
-        milk=100.0,
-        cream=30.0,
-        sugar=25.0,
-        stabilizers=1.65,
-        emulsifiers_kg=0.35,
-        water=43.0,
-    )
-
-    report = run_full_cycle(raw_materials=raw_materials)
-
-    print("=== Simulation Report ===")
-    print(f"Product to freezer: {report['mixer']['product_to_freezer_kg']:.2f} kg")
-    print(f"Ice cream volume:   {report['mixer']['ice_cream_volume_L']:.2f} L")
-    print(f"Wastewater:         {report['cip']['wastewater_mass_kg']:.2f} kg")
-    print(f"Bioplastic (PHA):   {report['bioconversion']['bioplastic_mass_kg']:.2f} kg")
-    print(f"Mass balance closed: {report['efficiency_summary']['mass_balance_closed']}")
-
-    # Full report (exclude typed_report for JSON)
-    out = {k: v for k, v in report.items() if k != "typed_report"}
-    print("\n--- JSON (excerpt) ---")
-    print(json.dumps(out, indent=2, default=str)[:1500] + "...")
-
-
-if __name__ == "__main__":
-    main()
+raw = RawMaterials(milk=100, cream=30, sugar=25, stabilizers=2, water=43, emulsifiers_kg=0.5)
+report = run_full_cycle(raw_materials=raw, residue_mass_fraction=0.02, air_overrun=0.5)
+print_report(report)
