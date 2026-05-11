@@ -16,15 +16,16 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from icecream_simulator.batch_models import WastewaterStream
+from icecream_simulator import constants as C
 
 
 class PrefiltrationConfig(BaseModel):
     """Coarse pre-filter: fraction of suspended solids removed (captured on screen)."""
 
     tss_removal_fraction: float = Field(
-        default=0.62,
+        default=C.PREFILTRATION_DEFAULT_TSS_REMOVAL,
         ge=0.0,
-        le=0.92,
+        le=C.PREFILTRATION_TSS_REMOVAL_CAP,
         description="Fraction of TSS mass removed (typical 0.5–0.85 for dairy CIP pretreatment)",
     )
 
@@ -39,11 +40,11 @@ def run_prefiltration(
     Returns (stream_to_cavitation, report_dict).
     """
     cfg = config or PrefiltrationConfig()
-    f = min(0.92, max(0.0, cfg.tss_removal_fraction))
-    v = max(wastewater.volume_L, 1e-9)
-    tss_kg = (wastewater.tss_mg_L * 1e-6) * v
+    f = min(C.PREFILTRATION_TSS_REMOVAL_CAP, max(0.0, cfg.tss_removal_fraction))
+    v = max(wastewater.volume_L, C.VOLUME_EPSILON_SMALL_L)
+    tss_kg = (wastewater.tss_mg_L * C.KG_PER_MG) * v
     tss_removed_kg = tss_kg * f
-    tss_mg_L_new = ((tss_kg - tss_removed_kg) * 1e6 / v) if v > 0 else 0.0
+    tss_mg_L_new = ((tss_kg - tss_removed_kg) * C.MG_PER_KG / v) if v > 0 else 0.0
 
     out = WastewaterStream(
         volume_L=wastewater.volume_L,
