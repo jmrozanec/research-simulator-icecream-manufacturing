@@ -153,7 +153,10 @@ src/icecream_simulator/
     └── __init__.py
 
 papers/
-└── README.md                     
+└── README.md
+
+skills/
+└── run-icecream-simulator/SKILL.md   # agent skill (platform-agnostic)
 ```
 
 Docs: `docs/SIMULATOR_CAPABILITIES_AND_SAMPLE_RUN.md` (capabilities and sample tables), `docs/WATER_TREATMENT_CAVITATION.md` (wastewater stage parameters and cavitation bibliography).
@@ -184,6 +187,16 @@ python examples/literature_presets.py
 pip install streamlit
 streamlit run examples/dashboard.py
 ```
+
+## Agent integration
+
+Portable **agent skills** live under [`skills/`](skills/). Each skill is a `SKILL.md` file (YAML frontmatter + instructions) that any agent runtime can load—copy the folder into your tool’s skills path or point the runtime at `skills/` in this repo.
+
+| Skill | Path |
+|-------|------|
+| `run-icecream-simulator` | [`skills/run-icecream-simulator/SKILL.md`](skills/run-icecream-simulator/SKILL.md) |
+
+That skill tells agents when and how to run `run.py` or `run_full_cycle`, emit JSON for parsing, which report keys matter, and how to run literature suites or parameter sweeps. Ask the agent to follow **run-icecream-simulator** or to run `python run.py` (optionally `--preset` / `--literature-suite`).
 
 ## License
 
