@@ -19,6 +19,7 @@ from icecream_simulator.crystallization_parameters import (
 from icecream_simulator.batch_models import MaterialBatch, TankResidue, Composition
 from icecream_simulator.mixer import MixerInput, run_mixer
 from icecream_simulator import industrial_physics as phys
+from icecream_simulator import energy_accounting as energy
 
 T_PREP_K = 328.0
 T_PASTEUR_K = 353.15
@@ -443,14 +444,16 @@ def run_industrial_chain(
     storage_time_s: float = 0.0,
     storage_temp_K: float = 248.15,
     crystallization_parameters: CrystallizationParameters | None = None,
-) -> tuple[MaterialBatch, MaterialBatch, TankResidue, float, float, list[dict]]:
+) -> tuple[MaterialBatch, MaterialBatch, TankResidue, float, float, list[dict], list[energy.EnergyBalance]]:
     """
     Full chain including flavor/inclusions, SSHE parameters, packaging.
 
     Returns final packaged product batch (same total mass as after hardening),
-    batch_after_ageing, cip_residue, ice_cream_volume_L, preparation_power_W, stage_results.
+    batch_after_ageing, cip_residue, ice_cream_volume_L, preparation_power_W, stage_results,
+    energy_balances (per-stage energy accounting).
     """
     stage_results: list[dict] = []
+    energy_balances: list[energy.EnergyBalance] = []
     total_input_kg = raw_materials.total_mass
     if total_input_kg <= 0:
         comp = Composition(fat=0, sugar=0, water=0, solids=0)
@@ -464,6 +467,14 @@ def run_industrial_chain(
         rpm=preparation_rpm,
         mixing_time_s=preparation_mixing_time_s,
     )
+    energy_prep = energy.energy_preparation_mix(
+        batch.mass_kg,
+        power_W,
+        preparation_mixing_time_s,
+        tank_surface_area_m2=tank_surface_area_m2,
+        T_process_K=batch.temperature_K,
+    )
+    energy_balances.append(energy_prep)
     stage_results.append({
         "stage": "preparation_mix",
         "mass_kg": batch.mass_kg,
@@ -471,10 +482,19 @@ def run_industrial_chain(
         "viscosity_Pa_s": batch.viscosity_Pa_s,
         "residue_kg": prep_residue.mass_kg,
         "power_W": power_W,
+        "energy_balance": energy_prep.to_dict(),
     })
 
     t_in = batch.temperature_K
     batch = run_pasteurization(batch, hold_time_s=pasteurization_hold_time_s)
+    energy_past = energy.energy_pasteurization(
+        batch.mass_kg,
+        float(batch.metadata.get("heat_duty_J", 0.0)),
+        pasteurization_hold_time_s,
+        tank_surface_area_m2=tank_surface_area_m2,
+        T_process_K=batch.temperature_K,
+    )
+    energy_balances.append(energy_past)
     stage_results.append({
         "stage": "pasteurization",
         "mass_kg": batch.mass_kg,
@@ -484,10 +504,17 @@ def run_industrial_chain(
         "hold_time_s": pasteurization_hold_time_s,
         "log10_pathogen_reduction": batch.metadata.get("log10_pathogen_reduction"),
         "d_value_minutes_at_hold_T": batch.metadata.get("d_value_minutes_at_hold_T"),
+        "energy_balance": energy_past.to_dict(),
     })
 
     d32_pre = 3.0
     batch = run_homogenization(batch, pressure_bar=homogenization_pressure_bar, d32_initial_um=d32_pre)
+    energy_homo = energy.energy_homogenization(
+        batch.mass_kg,
+        homogenization_pressure_bar,
+        pasteurization_hold_time_s,  # Use hold time as approx homogenizer transit
+    )
+    energy_balances.append(energy_homo)
     stage_results.append({
         "stage": "homogenization",
         "mass_kg": batch.mass_kg,
@@ -495,15 +522,25 @@ def run_industrial_chain(
         "viscosity_Pa_s": batch.viscosity_Pa_s,
         "pressure_bar": homogenization_pressure_bar,
         "fat_globule_d32_um": batch.metadata.get("fat_globule_d32_um"),
+        "energy_balance": energy_homo.to_dict(),
     })
 
     batch = run_cooling_phe(batch)
+    total_cooling_J = float(batch.metadata.get("heat_removed_stage1_J", 0.0)) + float(batch.metadata.get("heat_removed_stage2_J", 0.0))
+    energy_cool = energy.energy_cooling(
+        batch.mass_kg,
+        total_cooling_J,
+        coolant_temp_K=253.15,  # ~-20°C typical for first stage
+        tank_surface_area_m2=tank_surface_area_m2,
+    )
+    energy_balances.append(energy_cool)
     stage_results.append({
         "stage": "cooling_phe",
         "mass_kg": batch.mass_kg,
         "temp_out_K": batch.temperature_K,
         "heat_removed_stage1_J": batch.metadata.get("heat_removed_stage1_J"),
         "heat_removed_stage2_J": batch.metadata.get("heat_removed_stage2_J"),
+        "energy_balance": energy_cool.to_dict(),
     })
 
     batch_after_ageing, ageing_residue = run_ageing_vat(
@@ -512,6 +549,14 @@ def run_industrial_chain(
         stirrer_on=stirrer_on,
         jacket_flow_rate_L_min=jacket_flow_L_min,
     )
+    energy_age = energy.energy_ageing(
+        batch_after_ageing.mass_kg,
+        stirrer_on,
+        jacket_flow_L_min,
+        duration_hours=4.0,
+        tank_surface_area_m2=tank_surface_area_m2,
+    )
+    energy_balances.append(energy_age)
     stage_results.append({
         "stage": "ageing_vat",
         "mass_kg": batch_after_ageing.mass_kg,
@@ -519,6 +564,7 @@ def run_industrial_chain(
         "residue_kg": ageing_residue.mass_kg,
         "stirrer_on": stirrer_on,
         "fat_crystallinity_fraction": batch_after_ageing.metadata.get("fat_crystallinity_fraction"),
+        "energy_balance": energy_age.to_dict(),
     })
 
     batch = run_flavor_and_inclusions(
@@ -553,6 +599,16 @@ def run_industrial_chain(
         volume_fraction_wall_ice=volume_fraction_wall_ice,
         crystallization_parameters=crystallization_parameters,
     )
+    dasher_power_W = float(batch_after_freezer.metadata.get("dasher_shaft_power_W", 0.0))
+    energy_freeze = energy.energy_freezer(
+        batch_to_freezer.mass_kg,
+        dasher_power_W,
+        freezer_residence_time_s,
+        coolant_temp_K,
+        exit_temp_K=batch_after_freezer.temperature_K,
+        composition=batch_to_freezer.composition,
+    )
+    energy_balances.append(energy_freeze)
     stage_results.append({
         "stage": "freezer",
         "mass_kg": batch_after_freezer.mass_kg,
@@ -578,9 +634,18 @@ def run_industrial_chain(
         "residence_time_s": freezer_residence_time_s,
         "dasher_rpm": dasher_rpm,
         "crystallization_parameters_name": batch_after_freezer.metadata.get("crystallization_parameters_name"),
+        "energy_balance": energy_freeze.to_dict(),
     })
 
     batch = run_hardening(batch_after_freezer, crystallization_parameters=crystallization_parameters)
+    hardening_duty_J = float(batch.metadata.get("heat_removed_J", 0.0))
+    energy_hard = energy.energy_hardening(
+        batch.mass_kg,
+        hardening_duty_J,
+        duration_s=3600.0,  # ~1 hour typical hardening tunnel residence
+        hardening_temp_K=243.15,  # -30°C typical
+    )
+    energy_balances.append(energy_hard)
     stage_results.append({
         "stage": "hardening",
         "mass_kg": batch.mass_kg,
@@ -588,6 +653,7 @@ def run_industrial_chain(
         "heat_removed_J": batch.metadata.get("heat_removed_J"),
         "hardness_proxy_kPa": batch.metadata.get("hardness_proxy_kPa"),
         "melt_rate_proxy_per_s": batch.metadata.get("melt_rate_proxy_per_s"),
+        "energy_balance": energy_hard.to_dict(),
     })
 
     batch = run_storage_recrystallization(
@@ -632,4 +698,4 @@ def run_industrial_chain(
         },
     )
 
-    return final_product, batch_after_ageing, cip_residue, ice_cream_volume_L, power_W, stage_results
+    return final_product, batch_after_ageing, cip_residue, ice_cream_volume_L, power_W, stage_results, energy_balances

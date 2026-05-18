@@ -40,8 +40,44 @@ from icecream_simulator.crystallization_parameters import (
     load_crystallization_parameters_from_json,
     load_crystallization_parameters_from_yaml,
 )
+from icecream_simulator.provenance import Provenance, SourceKind
+from icecream_simulator.sensors import (
+    AccuracyKind,
+    SensorSpec,
+    SensorReading,
+    sample_reading,
+)
+from icecream_simulator.events import Severity, Event, EventBus
+from icecream_simulator.plant_profile import (
+    PlantProfile,
+    AlarmThresholds,
+    StageSensors,
+    build_midsize_continuous_dairy,
+    load_default_profile,
+    default_profile_path,
+)
+from icecream_simulator.instrumentation import apply_instrumentation
+from icecream_simulator.energy_accounting import (
+    EnergyBalance,
+    aggregate_energy_report,
+)
+from icecream_simulator.scenario_runner import (
+    Distribution,
+    Uniform,
+    LogUniform,
+    Triangular,
+    Constant,
+    Discrete,
+    Categorical,
+    RawMaterialsDist,
+    ProcessParamsDist,
+    ScenarioSpec,
+    SweepResult,
+    run_sweep,
+    diverse_industrial_spec,
+)
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "RawMaterials",
@@ -78,4 +114,36 @@ __all__ = [
     "load_crystallization_parameters",
     "load_crystallization_parameters_from_json",
     "load_crystallization_parameters_from_yaml",
+    # Phase-1 / Phase-2 enhancements
+    "Provenance",
+    "SourceKind",
+    "AccuracyKind",
+    "SensorSpec",
+    "SensorReading",
+    "sample_reading",
+    "Severity",
+    "Event",
+    "EventBus",
+    "PlantProfile",
+    "AlarmThresholds",
+    "StageSensors",
+    "build_midsize_continuous_dairy",
+    "load_default_profile",
+    "default_profile_path",
+    "apply_instrumentation",
+    "EnergyBalance",
+    "aggregate_energy_report",
+    "Distribution",
+    "Uniform",
+    "LogUniform",
+    "Triangular",
+    "Constant",
+    "Discrete",
+    "Categorical",
+    "RawMaterialsDist",
+    "ProcessParamsDist",
+    "ScenarioSpec",
+    "SweepResult",
+    "run_sweep",
+    "diverse_industrial_spec",
 ]

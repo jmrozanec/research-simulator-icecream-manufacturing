@@ -28,6 +28,7 @@ from icecream_simulator.batch_models import (
 from icecream_simulator.industrial_chain import run_industrial_chain
 from icecream_simulator import industrial_physics as phys
 from icecream_simulator import literature_recipes as lit
+from icecream_simulator import energy_accounting as energy
 from icecream_simulator.crystallization_parameters import (
     DEFAULT_CRYSTALLIZATION_PARAMETERS,
     CrystallizationParameters,
@@ -189,7 +190,7 @@ def run_full_cycle(
 
     # Industrial chain only: preparation (mixing) → pasteurization → homogenization →
     # cooling → ageing → freezer (aeration) → hardening
-    final_product, _batch_after_ageing, cip_residue, ice_cream_volume_L, power_W, stage_results = run_industrial_chain(
+    final_product, _batch_after_ageing, cip_residue, ice_cream_volume_L, power_W, stage_results, energy_balances = run_industrial_chain(
         raw,
         tank_surface_area_m2=tank_surface_area_m2,
         homogenization_pressure_bar=homogenization_pressure_bar,
@@ -317,6 +318,14 @@ def run_full_cycle(
             wastewater, config=CavitationConfig()
         )
         bioavailability_factor = float(cavitation_report.get("bioavailability_factor", 1.0))
+        # Add cavitation energy to balances
+        cavitation_kwh = float(cavitation_report.get("energy_proxy_kwh", 0.0))
+        if cavitation_kwh > 0:
+            energy_cav = energy.energy_cavitation(
+                wastewater.mass_kg,
+                cavitation_kwh,
+            )
+            energy_balances.append(energy_cav)
 
         if on_stage_complete:
             tss_removed = float(prefiltration_report.get("tss_removed_kg", 0.0))
@@ -526,6 +535,7 @@ def run_full_cycle(
             "mass_balance_closed": mass_balance_closed,
         },
         "quality": _quality_summary(stage_results, product_batch.metadata),
+        "energy": energy.aggregate_energy_report(energy_balances),
     }
     report["typed_report"] = MaterialBatchCycleReport(
         raw_materials_kg=total_input_kg,
