@@ -39,7 +39,7 @@ class CrystallizationParameters(BaseModel):
     wall_delta_T_coeff: float = 0.065
     wall_dasher_rpm_ref: float = 50.0
     wall_friction_rpm_sq_coeff: float = 0.00022
-    wall_hydrocolloid_suppression: float = 0.28
+    wall_hydrocolloid_suppression: float = 0.30  # Updated from 0.28; Flores & Goff 1999 IJDS 9:773
     wall_emulsifier_suppression: float = 0.12
     wall_max_hydrocolloid_fraction: float = 0.05
     wall_max_emulsifier_fraction: float = 0.05
@@ -53,7 +53,7 @@ class CrystallizationParameters(BaseModel):
     bulk_nucleation_delta_coeff: float = 0.038
     bulk_dasher_rpm_ref: float = 50.0
     bulk_friction_rpm_sq_coeff: float = 0.00026
-    bulk_hydrocolloid_suppression: float = 0.36
+    bulk_hydrocolloid_suppression: float = 0.45  # Updated from 0.36; bulk crystals more sensitive: Goff & Hartel 2013 Ch.8
     bulk_emulsifier_suppression: float = 0.06
     bulk_max_hydrocolloid_fraction: float = 0.05
     bulk_max_emulsifier_fraction: float = 0.05

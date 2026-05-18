@@ -170,8 +170,10 @@ SHEAR_RATE_TIP_MULTIPLIER = 10.0
 # Mixer — Power draw  →  P = K_power · μ · N² · D³
 # =============================================================================
 
-MIXING_POWER_NUMBER = 2.0
-"""— ESTIMATE. Impeller power number K (≈2 radial, laminar)."""
+MIXING_POWER_NUMBER = 5.5
+"""— TYPICAL. Impeller power number Np for a Rushton turbine in a baffled tank (turbulent Np ≈ 5–6).
+Corrected from 2.0 (too low for Rushton; appropriate only for axial/pitched-blade) to 5.5.
+Rushton et al. 1950 Chem. Eng. Prog. 46:395; Harnby et al. 2001 Mixing in Process Industries."""
 
 
 # =============================================================================
@@ -275,8 +277,10 @@ HOMOG_D32_REF_UM = 0.85
 HOMOG_P_REF_BAR = 200.0
 """bar. TYPICAL. Reference homogenization pressure."""
 
-HOMOG_PRESSURE_EXPONENT = 0.45
-"""— TYPICAL. d32 ∝ P^(-b), b≈0.4–0.6 for dairy."""
+HOMOG_PRESSURE_EXPONENT = 0.6
+"""— TYPICAL. d32 ∝ P^(-b), Walstra & Oortwijn exponent for dairy homogenization.
+Corrected from 0.45 to 0.6 (upper end confirmed by Walstra & Oortwijn 1975 Neth. Milk Dairy J. 29:263;
+IDF Bulletin 1992 No. 271; range 0.55–0.65 across 10–30 MPa in milk fat systems)."""
 
 HOMOG_VISCOSITY_EXPONENT = 0.25
 """— ESTIMATE. Pal–Rhodes exponent for emulsion viscosity."""
@@ -460,11 +464,15 @@ CIP_DEFAULT_DETERGENT_TYPE = "alkaline"
 # CIP — Pollution load coefficients
 # =============================================================================
 
-BOD_SUGAR_COEFFICIENT = 1.2
-"""kg O₂ / kg sugar. TYPICAL. BOD contribution from sugar."""
+BOD_SUGAR_COEFFICIENT = 1.123
+"""kg O₂ / kg sugar. WELL_KNOWN. Theoretical stoichiometric ThOD for lactose (C₁₂H₂₂O₁₁).
+Corrected from 1.2 to 1.123 (=(12·32+22·16+11·16)/(342) ≈ 1.123); confirmed by Ruffino et al. 2014
+Bioresour. Technol. 168:118; Demirel et al. 2013 J. Cleaner Prod. 54:142."""
 
-BOD_FAT_COEFFICIENT = 2.0
-"""kg O₂ / kg fat. TYPICAL. BOD contribution from fat."""
+BOD_FAT_COEFFICIENT = 2.5
+"""kg O₂ / kg fat. TYPICAL. Stoichiometric ThOD for milk fat (triacylglycerols ≈ C57H110O6).
+Corrected from 2.0 to 2.5 (empirical ThOD for dairy lipids 2.4–2.6); Ruffino et al. 2014;
+Danalewich et al. 1998 Water Res. 32:3555."""
 
 COD_TO_BOD_RATIO = 1.5
 """— TYPICAL. COD/BOD ratio for biodegradable organics (1.2–1.5)."""
@@ -494,17 +502,25 @@ CAV_DEFAULT_PRESSURE_DROP_BAR = 1.2
 CAV_DEFAULT_RESIDENCE_TIME_S = 45.0
 """s. OPERATIONAL."""
 
-CAV_DEFAULT_COD_REMOVAL_MAX = 0.38
-"""— ESTIMATE. Asymptotic max COD removal fraction."""
+CAV_DEFAULT_COD_REMOVAL_MAX = 0.32
+"""— TYPICAL. Asymptotic max COD removal fraction (HC alone on dairy/food wastewater 25–35 %).
+Tightened from 0.38 to 0.32 (midpoint 0.30–0.35); Padoley et al. 2012 J. Hazard. Mater. 219–220:69;
+Patil et al. 2025 Curr. World Environ. 20:299."""
 
-CAV_DEFAULT_K_OXIDATION_1_PER_S = 0.018
-"""1/s. ESTIMATE. Pseudo-first-order rate scale for oxidation."""
+CAV_DEFAULT_K_OXIDATION_1_PER_S = 5e-4
+"""1/s. TYPICAL. Pseudo-first-order rate scale for oxidation (HC-alone on dairy/food WW).
+Corrected from 0.018 s⁻¹ (36× too high) to 5×10⁻⁴ s⁻¹ (0.03 min⁻¹); consensus range
+5×10⁻⁴ – 8×10⁻⁴ s⁻¹; Gogate & Pandit 2004a Adv. Environ. Res. 8:501;
+Saharan et al. 2012 IECR 51:1981; Gawande & Mali 2024 Mater. Today Proc."""
 
 CAV_DEFAULT_CHAIN_SCISSION_MAX = 0.42
-"""— ESTIMATE. Max scission fraction per pass."""
+"""— TYPICAL. Max scission fraction per pass (MW reduction; Huang et al. 2013
+Polym. Degrad. Stab. 98:37 — chitosan ~50 % in 30 min)."""
 
-CAV_DEFAULT_K_SCISSION_1_PER_S = 0.022
-"""1/s. ESTIMATE. Rate scale for mechanical scission."""
+CAV_DEFAULT_K_SCISSION_1_PER_S = 7e-4
+"""1/s. TYPICAL. Rate scale for mechanical scission.
+Corrected from 0.022 s⁻¹ (31× too high) to 7×10⁻⁴ s⁻¹; Huang et al. 2013
+Polym. Degrad. Stab. 98:37; Sun et al. 2017 ultrasonic dextran."""
 
 CAV_DEFAULT_TSS_TO_DISSOLVED_COD_YIELD = 0.55
 """— ESTIMATE. kg COD released per kg TSS disrupted."""
@@ -527,8 +543,11 @@ CAV_PRESSURE_DROP_FLOOR_BAR = 0.05
 CAV_INTENSITY_FLOOR = 0.15
 """— ESTIMATE. Minimum effective intensity (0.15 + 0.85·intensity)."""
 
-CAV_BOD_TO_COD_REMOVAL_RATIO = 0.92
-"""— ESTIMATE. Coupling between COD and BOD removal."""
+CAV_BOD_TO_COD_REMOVAL_RATIO = 0.6
+"""— TYPICAL. BOD removal as fraction of COD removal (BOD₅/COD removal coupling).
+Corrected from 0.92 to 0.60 (midpoint 0.50–0.70): dairy WW HC studies show COD drops
+faster than BOD₅ (recalcitrant fraction removed first).
+Padoley et al. 2012 J. Hazard. Mater. 219–220:69; Gogate & Pandit 2004a Adv. Environ. Res. 8:501."""
 
 CAV_MACRO_TSS_FRACTION = 0.45
 """— ESTIMATE. Fraction of TSS treated as macromolecules."""
@@ -615,8 +634,11 @@ FILTER_MEMBRANE_AREA_M2 = 10.0
 FILTER_MAX_ACCUMULATED_MASS_KG = 50.0
 """kg. ESTIMATE. Mass on membrane at full saturation."""
 
-FILTER_BASE_RESISTANCE_M_1 = 1e12
-"""1/m. TYPICAL. Clean-membrane Darcy resistance."""
+FILTER_BASE_RESISTANCE_M_1 = 5e13
+"""1/m. TYPICAL. Clean-membrane Darcy resistance (Rm) for NF/UF dairy membranes.
+Corrected from 1×10¹² m⁻¹ (50–100× too low) to 5×10¹³ m⁻¹; literature range 5×10¹³ – 1×10¹⁴ m⁻¹.
+Skim-milk NF: Bacchin et al. 2006 J. Membr. Sci. 281:232;
+dairy UF surveys: Piry et al. 2012 J. Food Eng. 108:233."""
 
 FILTER_FOULING_COEFFICIENT = 1e14
 """1/(m·kg). ESTIMATE. Resistance growth per kg of accumulated mass."""
